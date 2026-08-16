@@ -13,6 +13,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   DATABASE_URL: z.string().default('./data/pluto.db'),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_AUTHORIZED_CHAT_ID: z.string().optional(),
   GOOGLE_API_KEY: z.string().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   PORT: z.string().default('3000'),

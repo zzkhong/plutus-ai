@@ -11,22 +11,29 @@
 
 ## Description
 
-Set up the Telegram bot that serves as the single UI for Pluto AI.
-Handles incoming messages (text and voice), routes commands, and formats
-responses. This module is the communication layer — it delegates actual
-business logic to the Expense Engine, Portfolio Tracker, and Budget
-System.
+Set up the Telegram bot that serves as the single conversational UI for
+Pluto AI. This is not a rule-based message switchboard; it is a
+chatbot-first interface that handles natural language, voice, and
+slash commands, then delegates actual business logic to the Expense
+Engine, Portfolio Tracker, and Budget System.
+
+The bot should feel like a personal finance assistant, not a rigid bot
+that responds with fixed canned phrases. Gemini should be used to
+classify user intent, extract structured data, and generate natural,
+context-aware replies.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Bot connects to Telegram and responds to messages
+- [ ] Bot connects to Telegram and responds as a conversational AI assistant
 - [ ] Command routing works for all defined commands (/portfolio,
       /today, /month, /budget, /export, /undo, /help)
-- [ ] Free-text messages are forwarded to the AI intent classifier
-- [ ] Voice messages are transcribed and processed as text
-- [ ] Bot responds with formatted messages (Markdown or HTML)
+- [ ] Free-text messages are sent to Gemini for intent classification,
+      structured extraction, and natural-language response generation
+- [ ] Voice messages are transcribed and processed as text before the
+      same AI flow
+- [ ] Bot responds with polished, contextual messages (Markdown or HTML)
 - [ ] Error handling: graceful failures with user-friendly messages
 - [ ] Bot ignores messages from non-authorized users (single-user
       security)
@@ -70,7 +77,7 @@ src/bot/
 └── types.ts              # Bot-specific types
 ```
 
-### Intent Classification
+### Intent Classification and Response Generation
 
 The bot must distinguish between:
 1. **Expense logging** — "Spent $4.50 at Ya Kun"
@@ -79,8 +86,17 @@ The bot must distinguish between:
 4. **Correction** — "Last one was transport not food"
 5. **Recurring setup** — "Log $2400 rent every 1st"
 
-This classification is delegated to Gemini with a system prompt that
-returns a structured intent + extracted data.
+This classification and the final message generation are delegated to
+Gemini through a system prompt that returns structured intent + extracted
+fields, and then the app turns that into a natural-language response. The
+bot should not rely on hardcoded if/else keyword matching for normal user
+conversation.
+
+A model-driven workflow is required:
+- classify the message
+- extract fields like amount, merchant, category, period, or budget amount
+- decide which domain module to call
+- generate a conversational confirmation or summary back to the user
 
 ### Voice Handling
 

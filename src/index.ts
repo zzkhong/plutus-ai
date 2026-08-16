@@ -6,6 +6,7 @@
 import { logger } from './utils/logger';
 import { config } from './config';
 import { db } from './db';
+import { PlutoBot } from './bot';
 
 /**
  * Initialize application
@@ -32,8 +33,15 @@ async function initialize(): Promise<void> {
     logger.info(`Database: ${config.DATABASE_URL}`);
     logger.info(`Log Level: ${config.LOG_LEVEL}`);
 
-    // TODO: Initialize bot, scheduler, and HTTP server
-    logger.info('Placeholder: Bot, Scheduler, and HTTP server initialization pending...');
+    if (config.TELEGRAM_BOT_TOKEN) {
+      const bot = new PlutoBot();
+      await bot.start();
+      logger.info('Telegram bot core initialized');
+    } else {
+      logger.warn('Telegram bot not started because TELEGRAM_BOT_TOKEN is not configured');
+    }
+
+    logger.info('Scheduler and HTTP server initialization pending...');
   } catch (error) {
     logger.error('Failed to initialize application', error);
     process.exit(1);
