@@ -134,3 +134,7 @@ export { cardCurrencyMap } from './config/currencies'
 - `amount_sgd` is the normalized base currency value for all reporting.
 - Card-to-currency mapping is user-configurable (stored in user_config
   or a JSON file).
+- `GOOGLE_API_KEY` is a required env var, not optional — env validation
+  should fail startup if it's missing. Pluto AI classifies every message
+  through Gemini (see PLUTO-02) and has no rule-based fallback, so there
+  is no valid "no key" mode to support.

@@ -4,6 +4,8 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { config } from '../config';
+import { logger } from '../utils/logger';
+import { formatUserFriendlyError } from './formatter/messages';
 import { BotIntent } from './types';
 
 export interface ExtractedFields {
@@ -20,84 +22,24 @@ export interface IntentAnalysis {
   confidence: number;
   extracted: ExtractedFields;
   rawText: string;
+  /** Set when this result is a degraded response to a Gemini call failure, not a real classification. */
+  serviceError?: boolean;
 }
 
-const fallbackPatterns: Array<{ intent: BotIntent; match: (text: string) => boolean }> = [
-  {
-    intent: 'expense',
-    match: (text) => /(spent|expense|log|paid|bought|charged)/i.test(text),
-  },
-  {
-    intent: 'budget',
-    match: (text) => /(budget|set .* budget|limit)/i.test(text),
-  },
-  {
-    intent: 'correction',
-    match: (text) => /(last one|actually|correction|not .*|wrong)/i.test(text),
-  },
-  {
-    intent: 'recurring',
-    match: (text) => /(every|monthly|weekly|recurring|every 1st|rent)/i.test(text),
-  },
-  {
-    intent: 'query',
-    match: (text) => /(how much|what did|show|summary|portfolio|spend)/i.test(text),
-  },
-];
-
-function fallbackIntentAnalysis(rawText: string): IntentAnalysis {
-  const trimmed = rawText.trim();
-  const intentEntry = fallbackPatterns.find(({ match }) => match(trimmed)) ?? {
-    intent: 'unknown' as BotIntent,
-    match: () => false,
-  };
-
+/**
+ * Returned when Gemini itself fails (timeout, network error, unparseable response).
+ * There is deliberately no rule-based classification here — Pluto AI is Gemini-first,
+ * see doc/tasks/02-telegram-bot.md. A failure is surfaced as "unknown" with serviceError
+ * set, not silently guessed via keyword matching.
+ */
+function gracefulUnknown(rawText: string): IntentAnalysis {
   return {
-    intent: intentEntry.intent,
-    confidence: intentEntry.intent === 'unknown' ? 0.1 : 0.75,
-    extracted: extractFieldsFromText(trimmed),
-    rawText: trimmed,
+    intent: 'unknown',
+    confidence: 0,
+    extracted: {},
+    rawText,
+    serviceError: true,
   };
-}
-
-function extractFieldsFromText(rawText: string): ExtractedFields {
-  const result: ExtractedFields = {};
-
-  const moneyMatch = rawText.match(/\$?\s?(\d+(?:\.\d{1,2})?)/i);
-  if (moneyMatch) {
-    result.amount = Number(moneyMatch[1]);
-  }
-
-  const merchantMatch = rawText.match(/at\s+([A-Za-z0-9 &'-]+)/i)
-    ?? rawText.match(/for\s+([A-Za-z0-9 &'-]+)/i);
-  if (merchantMatch) {
-    result.merchant = merchantMatch[1].trim();
-  }
-
-  if (/food|coffee|lunch|dinner|snack|kopi|hawker|mamak|nasi/i.test(rawText)) {
-    result.category = 'Food';
-  } else if (/transport|grab|uber|taxi|train|bus|mrt|ride/i.test(rawText)) {
-    result.category = 'Transport';
-  } else if (/rent|mortgage|housing|bill|phone|internet|utilities/i.test(rawText)) {
-    result.category = 'Bills';
-  } else if (/movie|netflix|spotify|cinema|concert|games/i.test(rawText)) {
-    result.category = 'Entertainment';
-  }
-
-  if (/month|monthly/i.test(rawText)) {
-    result.period = 'month';
-  } else if (/today|daily/i.test(rawText)) {
-    result.period = 'today';
-  }
-
-  if (/budget.*\$?\s?(\d+(?:\.\d{1,2})?)/i.test(rawText)) {
-    const budgetMatch = rawText.match(/budget.*\$?\s?(\d+(?:\.\d{1,2})?)/i);
-    if (budgetMatch) {
-      result.budgetAmount = Number(budgetMatch[1]);
-    }
-  }
-
-  return result;
 }
 
 function safeJsonParse(text: string): Partial<IntentAnalysis> | null {
@@ -125,23 +67,20 @@ export async function classifyUserMessage(rawText: string): Promise<IntentAnalys
     };
   }
 
-  if (!config.GOOGLE_API_KEY) {
-    return fallbackIntentAnalysis(trimmed);
-  }
-
   try {
     const genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-3.6-flash',
       systemInstruction:
         'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action }, rawText. Allowed intents: expense, query, budget, correction, recurring, help, unknown. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
     });
 
     const prompt = `User message: "${trimmed}"\n\nReturn only valid JSON with keys intent, confidence, extracted, rawText.`;
     
-    // Add a 5-second timeout to avoid hanging
+    // gemini-3.6-flash's reasoning overhead routinely takes ~5s for this prompt,
+    // so the timeout needs enough headroom to not misfire as a service error.
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Gemini API call timed out after 5s')), 5000);
+      setTimeout(() => reject(new Error('Gemini API call timed out after 15s')), 15000);
     });
     
     const result = await Promise.race([
@@ -153,7 +92,8 @@ export async function classifyUserMessage(rawText: string): Promise<IntentAnalys
     const parsed = safeJsonParse(response);
 
     if (!parsed) {
-      return fallbackIntentAnalysis(trimmed);
+      logger.warn('Gemini returned an unparseable response, degrading to unknown intent', { response });
+      return gracefulUnknown(trimmed);
     }
 
     const intent = (parsed.intent as BotIntent | undefined) ?? 'unknown';
@@ -166,13 +106,17 @@ export async function classifyUserMessage(rawText: string): Promise<IntentAnalys
       rawText: String(parsed.rawText ?? trimmed),
     };
   } catch (error) {
-    console.warn('Gemini classification failed, falling back to local heuristic', error);
-    return fallbackIntentAnalysis(trimmed);
+    logger.error('Gemini classification failed', error);
+    return gracefulUnknown(trimmed);
   }
 }
 
 export function buildAssistantReply(result: IntentAnalysis): string {
-  const { intent, extracted, rawText } = result;
+  const { intent, extracted, rawText, serviceError } = result;
+
+  if (serviceError) {
+    return formatUserFriendlyError();
+  }
 
   switch (intent) {
     case 'expense': {
