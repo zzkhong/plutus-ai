@@ -9,12 +9,12 @@ export type Category =
   | 'Transport'
   | 'Shopping'
   | 'Entertainment'
-  | 'Healthcare'
-  | 'Utilities'
+  | 'Bills'
+  | 'Health'
   | 'Education'
-  | 'Investment'
-  | 'Savings'
-  | 'Other';
+  | 'Travel'
+  | 'Groceries'
+  | 'Others';
 
 export interface Transaction {
   id: string;

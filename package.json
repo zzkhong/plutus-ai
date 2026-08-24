@@ -11,7 +11,7 @@
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write src/**/*.ts",
-    "test": "npx tsx --test src/bot/ai.test.ts"
+    "test": "npx tsx --test src/bot/ai.test.ts src/expense/expense.test.ts"
   },
   "repository": {
     "type": "git",

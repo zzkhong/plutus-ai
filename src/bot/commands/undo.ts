@@ -2,6 +2,14 @@
  * /undo command handler
  */
 
+import { undoLastTransaction } from '../../expense';
+
 export async function handleUndoCommand(): Promise<string> {
-  return 'Undo is ready — just waiting on the transaction layer.\n\nThis will remove the most recent logged item once the expense logic is connected.';
+  const removed = await undoLastTransaction();
+
+  if (!removed) {
+    return 'There is no transaction to undo yet.';
+  }
+
+  return `Removed the last transaction: ${removed.merchant} (${(removed.amount_sgd / 100).toFixed(2)} SGD).`;
 }

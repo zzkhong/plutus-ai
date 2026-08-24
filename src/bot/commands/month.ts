@@ -2,6 +2,14 @@
  * /month command handler
  */
 
+import { getSpendingSummary } from '../../expense';
+
 export async function handleMonthCommand(): Promise<string> {
-  return 'Monthly breakdown is ready to go — I just need the expense data connected.\n\nThis should show category totals for the month once it\'s live.';
+  const summary = await getSpendingSummary('month');
+  const total = (summary.total / 100).toFixed(2);
+  const topCategories = Object.entries(summary.byCategory)
+    .map(([category, amount]) => `${category}: ${(amount / 100).toFixed(2)}`)
+    .join(', ') || 'none';
+
+  return `This month’s spend: S$${total}.\nTransactions: ${summary.count}.\nBy category: ${topCategories}.`;
 }

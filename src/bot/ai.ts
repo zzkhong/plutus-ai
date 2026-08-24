@@ -74,12 +74,14 @@ function extractFieldsFromText(rawText: string): ExtractedFields {
     result.merchant = merchantMatch[1].trim();
   }
 
-  if (/food|coffee|lunch|dinner|snack/i.test(rawText)) {
+  if (/food|coffee|lunch|dinner|snack|kopi|hawker|mamak|nasi/i.test(rawText)) {
     result.category = 'Food';
-  } else if (/transport|grab|uber|taxi|train|bus|mrt/i.test(rawText)) {
+  } else if (/transport|grab|uber|taxi|train|bus|mrt|ride/i.test(rawText)) {
     result.category = 'Transport';
-  } else if (/rent|mortgage|housing/i.test(rawText)) {
-    result.category = 'Utilities';
+  } else if (/rent|mortgage|housing|bill|phone|internet|utilities/i.test(rawText)) {
+    result.category = 'Bills';
+  } else if (/movie|netflix|spotify|cinema|concert|games/i.test(rawText)) {
+    result.category = 'Entertainment';
   }
 
   if (/month|monthly/i.test(rawText)) {
@@ -130,13 +132,23 @@ export async function classifyUserMessage(rawText: string): Promise<IntentAnalys
   try {
     const genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-1.5-flash',
       systemInstruction:
         'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action }, rawText. Allowed intents: expense, query, budget, correction, recurring, help, unknown. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
     });
 
     const prompt = `User message: "${trimmed}"\n\nReturn only valid JSON with keys intent, confidence, extracted, rawText.`;
-    const result = await model.generateContent(prompt);
+    
+    // Add a 5-second timeout to avoid hanging
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Gemini API call timed out after 5s')), 5000);
+    });
+    
+    const result = await Promise.race([
+      model.generateContent(prompt),
+      timeoutPromise,
+    ]);
+    
     const response = result.response.text();
     const parsed = safeJsonParse(response);
 
