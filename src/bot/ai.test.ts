@@ -20,14 +20,37 @@ test('buildAssistantReply uses the user message details for expense replies', ()
   assert.match(reply, /Food/i);
 });
 
+test('buildAssistantReply returns the generic error message when Gemini failed, not a guessed intent', () => {
+  const reply = buildAssistantReply({
+    intent: 'unknown',
+    confidence: 0,
+    extracted: {},
+    rawText: 'Spent $4.50 at Ya Kun',
+    serviceError: true,
+  });
 
-test('classifyUserMessage returns expense intent', async (t) => {
-  // Mock the Gemini API
-  const originalEnv = process.env.GOOGLE_API_KEY;
-  process.env.GOOGLE_API_KEY = '';  // Disable Gemini, use fallback heuristics
-  
+  assert.match(reply, /hiccupped/i);
+});
+
+test('classifyUserMessage returns expense intent for a real Gemini call', async () => {
+  // Pluto AI is Gemini-first with no rule-based fallback (see doc/tasks/02-telegram-bot.md),
+  // so this exercises the real API using GOOGLE_API_KEY from the environment.
   const result = await classifyUserMessage('Spent $4.50 at Ya Kun');
   assert.equal(result.intent, 'expense');
-  
-  process.env.GOOGLE_API_KEY = originalEnv;
+  assert.equal(result.serviceError, undefined);
+});
+
+test('classifyUserMessage degrades gracefully instead of guessing when the Gemini call fails', async () => {
+  const originalFetch = global.fetch;
+  global.fetch = (() => {
+    throw new Error('simulated network failure');
+  }) as typeof fetch;
+
+  try {
+    const result = await classifyUserMessage('Spent $4.50 at Ya Kun');
+    assert.equal(result.intent, 'unknown');
+    assert.equal(result.serviceError, true);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

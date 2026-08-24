@@ -90,7 +90,12 @@ This classification and the final message generation are delegated to
 Gemini through a system prompt that returns structured intent + extracted
 fields, and then the app turns that into a natural-language response. The
 bot should not rely on hardcoded if/else keyword matching for normal user
-conversation.
+conversation — not as the primary path, and not as a silent fallback when
+Gemini is unavailable. `GOOGLE_API_KEY` is a required environment variable
+(startup fails without it); if a Gemini call itself fails at runtime
+(timeout, network error, unparseable response), surface the existing
+`formatUserFriendlyError()` message rather than guessing an intent from
+keywords.
 
 A model-driven workflow is required:
 - classify the message
@@ -141,4 +146,14 @@ sendMessage(text: string): Promise<void>
 - Voice transcription quality is best-effort; user can always re-type
   if transcription is wrong.
 - Response time target: < 5 seconds for text, < 10 seconds for
-  voice (includes transcription).
+  voice (includes transcription). In practice `gemini-3.6-flash`'s
+  reasoning overhead alone runs close to 5s for the classification
+  prompt used here, so the in-app request timeout is set to 15s to
+  avoid misfiring as a service error — revisit the target if a faster
+  model/prompt becomes available.
+- Pin an explicit, current model id (currently `gemini-3.6-flash`) rather
+  than an alias like `gemini-flash-latest`, so behavior doesn't drift
+  silently when Google rotates the alias. Google deprecates model ids
+  over time (`gemini-1.5-flash` and `gemini-2.5-flash` both returned 404
+  as of 2026-08); check `GET /v1beta/models` against the configured
+  `GOOGLE_API_KEY` if classification starts failing.
