@@ -20,6 +20,12 @@ movements into a single concise message.
 
 ## Acceptance Criteria
 
+**Status: not started.** No `src/digest/` directory exists. `node-cron`
+is now used in `src/scheduler/recurring.ts` (PLUTO-03's recurring
+transaction scheduler runs daily at 00:00), so the dependency is no
+longer unused — but nothing schedules the 10 PM digest job itself.
+None of the criteria below are implemented.
+
 - [ ] Scheduler fires at 10 PM SGT daily (Asia/Singapore timezone)
 - [ ] Message includes today's total spending broken down by category
 - [ ] Message includes transaction count per category
@@ -129,3 +135,26 @@ buildDigestMessage(): Promise<string>
 - node-cron expression: `0 22 * * *` (10 PM daily).
 - If the bot was offline at 10 PM, the digest for that day is skipped
   (acceptable for personal tool).
+
+---
+
+## Improvisation / Suggested Next Steps
+
+- Follow the pattern already established in `src/scheduler/recurring.ts`
+  (a `start*Scheduler()` / `stop*Scheduler()` pair around a
+  `cron.schedule()` call, started from `src/index.ts`) rather than
+  inventing a new scheduling convention in `src/digest/index.ts` — it
+  keeps `src/scheduler/` as the one place that owns cron jobs, and
+  `src/digest/` can stay focused on aggregation and formatting.
+- This module's dependency table lists all of PLUTO-03/04/05, but 04
+  and 05 are both unstarted (see those docs). The aggregator should be
+  written to treat portfolio and budget data as optional from day one
+  (the "Graceful Degradation" section already calls for this) so a
+  spending-only digest can ship as soon as PLUTO-03 data is enough,
+  instead of the whole module waiting on 04 and 05 to land.
+- Given the "one-liner summary" is explicitly optional/AI-upgradeable
+  per the notes above, ship the rule-based version first — it doesn't
+  need a Gemini call in the nightly critical path, which keeps the
+  digest resilient to the same kind of Gemini outage that would
+  otherwise degrade classification (see PLUTO-02's `serviceError`
+  handling).

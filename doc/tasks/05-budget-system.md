@@ -19,6 +19,11 @@ and resets monthly. Budget status is included in the daily digest.
 
 ## Acceptance Criteria
 
+**Status: not started.** No `src/budget/` directory exists; `/budget`
+(src/bot/commands/budget.ts) is a hardcoded placeholder string. The
+`budgets` table exists in the schema but nothing reads or writes to it.
+None of the criteria below are implemented.
+
 - [ ] User can set budgets via chat: "Set food budget to $800/month"
 - [ ] User can update or remove budgets
 - [ ] Budget progress calculated from current month's spending in that
@@ -121,3 +126,25 @@ import { db } from '../db'
 - Budget amounts store original currency (e.g. RM500) and a
   pre-computed SGD equivalent for comparison against spending.
 - If no currency specified, defaults to SGD.
+
+---
+
+## Improvisation / Suggested Next Steps
+
+- This is the smallest of the unstarted modules to bring online:
+  `getSpendingByCategory('month')` already exists in
+  `src/expense/service.ts` with exactly the signature this module needs
+  to consume, and the `budgets` table already exists in the schema. The
+  progress-calculator half of this module is mostly gluing two
+  already-built pieces together rather than new plumbing.
+- Given PLUTO-03's correction handler already sets a precedent
+  (`src/bot/ai.ts` dynamically imports `correctLastTransaction` to avoid
+  a circular dependency with the expense module), expect the same
+  pattern will be needed wiring `case 'budget'` to `setBudget()`/
+  `getBudgetStatus()` here.
+- Alert delivery is explicitly out of scope for this module's own
+  persistence (it "returns the alert data, the bot module handles
+  delivery" per the Notes) — so budget alerts and the daily digest
+  (PLUTO-06) will likely want to share one code path for turning a
+  `BudgetStatus`/`Alert` into a Telegram message, rather than each
+  formatting it independently.

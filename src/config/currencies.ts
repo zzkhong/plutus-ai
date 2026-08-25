@@ -24,12 +24,15 @@ export const DEFAULT_CARD_CURRENCY_MAP: Record<string, Currency> = {
   'OCBC': 'SGD',
   'DBS': 'SGD',
   'UOB': 'SGD',
+  'Maybank': 'MYR',
+  'CIMB': 'MYR',
   'Crypto.com': 'USD',
   'Binance': 'USD',
   'Gemini': 'USD',
 };
 
-// Exchange rates (ideally fetched from API, but hardcoded for now)
+// DEPRECATED: Hardcoded exchange rates for backward compatibility only
+// Use getExchangeRates() from ./exchange-rates.ts for live rates
 // Values are in relation to SGD (1 SGD = ? currency)
 export const EXCHANGE_RATES: Record<Currency, number> = {
   SGD: 1.0,
@@ -41,8 +44,10 @@ export const EXCHANGE_RATES: Record<Currency, number> = {
 };
 
 /**
- * Convert amount from one currency to another
+ * Convert amount from one currency to another (synchronous, uses static rates)
  * All amounts are in cents
+ *
+ * NOTE: This uses static fallback rates. For live rates, use convertCurrencyAsync() from ./exchange-rates.ts
  */
 export function convertCurrency(
   amount: number,
@@ -61,7 +66,9 @@ export function convertCurrency(
 }
 
 /**
- * Convert any amount to SGD (base currency)
+ * Convert any amount to SGD (base currency) using static rates
+ *
+ * NOTE: This uses static fallback rates. For live rates, consider refactoring to async
  */
 export function toSGD(amount: number, currency: Currency): number {
   return convertCurrency(amount, currency, 'SGD');

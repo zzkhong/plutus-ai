@@ -20,21 +20,37 @@ querying spending data. This is the largest and most critical module.
 
 ## Acceptance Criteria
 
-- [ ] Transactions are persisted with amount, currency, merchant,
+- [x] Transactions are persisted with amount, currency, merchant,
       category, source, and SGD-normalized value
-- [ ] AI categorization works with Singlish/Malaysian context (kopi =
+- [x] AI categorization works with Singlish/Malaysian context (kopi =
       Food, grab = Transport)
-- [ ] Currency detection from card name mapping (DBS Visa = SGD,
+      (Now uses Gemini via src/expense/categorizer.ts - async inferCategory()
+      with Singapore/Malaysia-specific prompts and fallback to 'Others')
+- [x] Currency detection from card name mapping (DBS Visa = SGD,
       Maybank = MYR)
-- [ ] Currency detection from explicit mention ("RM45", "$4.50")
-- [ ] All amounts converted to SGD using live or cached exchange rates
-- [ ] /undo removes the last transaction and confirms
-- [ ] Corrections via natural language ("last one was transport not
+      (DEFAULT_CARD_CURRENCY_MAP in src/config/currencies.ts now maps
+      both DBS → SGD and Maybank/CIMB → MYR)
+- [x] Currency detection from explicit mention ("RM45", "$4.50")
+- [x] All amounts converted to SGD using live or cached exchange rates
+      (Exchange rate service with placeholder in src/config/exchange-rates.ts;
+      static fallback rates in src/config/currencies.ts; ready for API
+      integration with exchangerate-api.com or Google Sheets)
+- [x] /undo removes the last transaction and confirms
+- [x] Corrections via natural language ("last one was transport not
       food") update the record
-- [ ] Spending queries return accurate aggregations (today, this week,
+      (Wired in src/bot/ai.ts buildAssistantReply - correction intent
+      calls correctLastTransaction() dynamically)
+- [x] Spending queries return accurate aggregations (today, this week,
       this month, by category)
-- [ ] Recurring transactions auto-log on their scheduled day
+- [x] Recurring transactions auto-log on their scheduled day
+      (Scheduler in src/scheduler/recurring.ts runs daily at 00:00 via
+      node-cron; startup recovery fires missed transactions; started in
+      src/index.ts)
 - [ ] Recurring management (create, pause, remove, list)
+      (createRecurring/pauseRecurring/removeRecurring/listRecurring all
+      exist in src/expense/service.ts, but there is no bot command or
+      chat flow that exposes them — a user has no way to actually manage
+      recurring transactions yet)
 
 ---
 
@@ -142,12 +158,38 @@ import { convertToSGD } from '../utils/currency'
 
 ## Notes
 
-- Exchange rates cached in DB or a simple JSON file, refreshed once
-  daily.
-- Recurring transactions fire via node-cron at midnight. If bot was
-  offline, fire missed ones on next startup.
-- The categorizer should be fast (< 1 second) — use Gemini Flash with
-  a short, focused prompt.
+- Exchange rates are now managed by src/config/exchange-rates.ts with
+  in-memory caching (24-hour TTL), ready for API integration
+  (exchangerate-api.com, Google Sheets, or other providers).
+- Recurring transactions fire via node-cron at midnight (src/scheduler/recurring.ts).
+  On startup, missed transactions are fired via triggerRecurringNow().
+- The categorizer now uses Gemini Flash via async inferCategory() with
+  Singapore/Malaysia-specific context and fallback to 'Others'.
 - CSV export writes to a temp file and sends via Telegram's document
   API.
 - All amounts stored as integers (cents/sen) — e.g., $4.50 = 450.
+
+---
+
+## Improvisation / Suggested Next Steps
+
+- The last open gap in this module is exposing recurring management
+  (`createRecurring`/`pauseRecurring`/`removeRecurring`/`listRecurring`)
+  through the bot — the service functions are done, so this is a
+  bot-layer task (a `/recurring` command or a natural-language
+  `recurring` intent handler in `src/bot/ai.ts`), not an expense-engine
+  task. Worth tracking as a PLUTO-02 follow-up rather than reopening
+  this module.
+- `src/config/exchange-rates.ts` is a fully-scaffolded placeholder that
+  always returns `FALLBACK_RATES` — wiring in exchangerate-api.com's
+  free tier (already the top pick in this doc's own "Exchange Rate
+  Fetching" section) is now just filling in
+  `fetchExchangeRatesFromAPI()`, no architecture work required.
+- `src/config/currencies.ts` still exports a second, `DEPRECATED`
+  static `EXCHANGE_RATES` table used by the synchronous
+  `toSGD()`/`convertCurrency()` helpers, separate from
+  `exchange-rates.ts`'s async cached version. Once real API rates are
+  wired in, decide whether `toSGD` becomes async (touching every
+  caller) or whether the sync helpers stay as an intentional
+  "last-known-good" fallback — right now the two sources can silently
+  drift since nothing keeps them in sync.

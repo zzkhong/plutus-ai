@@ -21,6 +21,10 @@ manual effort.
 
 ## Acceptance Criteria
 
+**Status: not started.** No `src/webhook/` directory exists, and there is
+no HTTP server usage anywhere in `src/` despite `hono` being a dependency.
+None of the criteria below are implemented.
+
 - [ ] HTTP POST endpoint accepts transaction data from iOS Shortcut
 - [ ] Endpoint is secured (API key or shared secret in header)
 - [ ] Payload includes: amount, merchant name, card name used
@@ -151,3 +155,24 @@ sendMessage(text: string): Promise<void>
   "RM 45.00"), the currency resolver in Expense Engine handles it.
 - Document the exact iOS Shortcut steps so the user can recreate it
   if they reset their phone.
+
+---
+
+## Improvisation / Suggested Next Steps
+
+- **Consider prioritizing this module next, ahead of 04/05/06.** It's
+  marked P0 like PLUTO-01/02/03, but unlike those it has zero code so
+  far — while PLUTO-04 and 05 (both lower-priority P1s) already have
+  more scaffolding (`exchange-rates.ts`, schema tables). Per this
+  module's own description it's meant to capture "~90% of daily
+  transactions with zero manual effort," and everything it depends on
+  (`logExpense`, `cardCurrencyMap`, `sendMessage`) is already built and
+  working from PLUTO-02/03 — so of the four unstarted modules, this one
+  is both the highest stated priority and the shortest path to
+  something end-to-end useful.
+- `hono` has been a dependency since PLUTO-01 but is unused anywhere in
+  `src/` — this module is what it was added for.
+- The `/api/health` endpoint costs almost nothing to add alongside
+  `/api/apple-pay` and gives an easy way to confirm the tunnel/deploy
+  (Cloudflare Tunnel, ngrok, etc.) is actually reachable before wiring
+  up the iOS Shortcut against it.

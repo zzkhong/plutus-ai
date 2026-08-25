@@ -7,6 +7,7 @@ import { logger } from './utils/logger';
 import { config } from './config';
 import { db } from './db';
 import { PlutoBot } from './bot';
+import { startRecurringScheduler, triggerRecurringNow } from './scheduler/recurring';
 
 /**
  * Initialize application
@@ -41,7 +42,14 @@ async function initialize(): Promise<void> {
       logger.warn('Telegram bot not started because TELEGRAM_BOT_TOKEN is not configured');
     }
 
-    logger.info('Scheduler and HTTP server initialization pending...');
+    // Start recurring transactions scheduler
+    startRecurringScheduler();
+
+    // Check and fire any recurring transactions that may have been missed during downtime
+    logger.info('Checking for recurring transactions due today...');
+    await triggerRecurringNow();
+
+    logger.info('Recurring transactions scheduler running (daily at 00:00)');
   } catch (error) {
     logger.error('Failed to initialize application', error);
     process.exit(1);

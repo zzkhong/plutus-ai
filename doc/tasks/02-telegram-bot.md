@@ -26,16 +26,29 @@ context-aware replies.
 
 ## Acceptance Criteria
 
-- [ ] Bot connects to Telegram and responds as a conversational AI assistant
-- [ ] Command routing works for all defined commands (/portfolio,
+- [x] Bot connects to Telegram and responds as a conversational AI assistant
+- [x] Command routing works for all defined commands (/portfolio,
       /today, /month, /budget, /export, /undo, /help)
-- [ ] Free-text messages are sent to Gemini for intent classification,
+- [x] Free-text messages are sent to Gemini for intent classification,
       structured extraction, and natural-language response generation
+- [x] Correction intent ("last one was transport not food") is now wired
+      to call correctLastTransaction() and update the most recent transaction
+      (src/bot/ai.ts buildAssistantReply)
+- [ ] Expense intent from free text is persisted via the Expense Engine
+      (src/bot/ai.ts buildAssistantReply's `case 'expense'` only returns
+      an acknowledgement string built from the extracted fields — it
+      never calls logExpense(), so "Spent $4.50 at Ya Kun" typed as chat
+      does not create a transaction. Only /today, /month, /export, /undo,
+      and correction currently touch the expense engine from the bot.
+      Same gap for `case 'budget'`, which never calls setBudget — though
+      that's expected until PLUTO-05 exists.)
 - [ ] Voice messages are transcribed and processed as text before the
       same AI flow
-- [ ] Bot responds with polished, contextual messages (Markdown or HTML)
-- [ ] Error handling: graceful failures with user-friendly messages
-- [ ] Bot ignores messages from non-authorized users (single-user
+      (src/bot/handlers/voice.ts is a stub — it returns a placeholder
+      string and never transcribes or routes into classifyUserMessage)
+- [x] Bot responds with polished, contextual messages (Markdown or HTML)
+- [x] Error handling: graceful failures with user-friendly messages
+- [x] Bot ignores messages from non-authorized users (single-user
       security)
 
 ---
@@ -157,3 +170,22 @@ sendMessage(text: string): Promise<void>
   over time (`gemini-1.5-flash` and `gemini-2.5-flash` both returned 404
   as of 2026-08); check `GET /v1beta/models` against the configured
   `GOOGLE_API_KEY` if classification starts failing.
+
+---
+
+## Improvisation / Suggested Next Steps
+
+- **Close the expense-intent gap first.** `logExpense()`, currency
+  resolution, and categorization already exist and are exercised by the
+  slash commands — wiring `case 'expense'` in `buildAssistantReply` to
+  call `logExpense()` with the extracted `amount`/`merchant`/`category`
+  is a small, self-contained change that would make free-text expense
+  logging (the bot's headline feature per the module description)
+  actually work end-to-end, rather than only acknowledging the message.
+- **Voice** is the only remaining stub in this module
+  (`src/bot/handlers/voice.ts`). Gemini's multimodal input can take the
+  downloaded audio file directly — no separate speech-to-text API is
+  needed, which simplifies the "Voice Handling" section above.
+- Once `case 'expense'` is wired, reuse the same confirmation phrasing
+  used by `/today`/`/undo` so slash-command and free-text replies stay
+  visually consistent.

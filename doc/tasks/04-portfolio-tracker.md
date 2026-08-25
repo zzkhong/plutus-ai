@@ -20,6 +20,10 @@ SGD, allocation percentages, and daily movements.
 
 ## Acceptance Criteria
 
+**Status: not started.** No `src/portfolio/` directory exists; `/portfolio`
+(src/bot/commands/portfolio.ts) is a hardcoded placeholder string. None of
+the criteria below are implemented.
+
 - [ ] User can add/remove holdings via chat ("Add 10 AAPL", "Remove
       CIMB")
 - [ ] US stock prices fetched from a free API (Yahoo Finance, Alpha
@@ -136,3 +140,21 @@ import { convertToSGD } from '../utils/currency'
 - Net worth = sum of (quantity * price * exchange_rate_to_SGD) for all
   holdings.
 - Cash balances are just holdings with quantity = amount and price = 1.
+
+---
+
+## Improvisation / Suggested Next Steps
+
+- Start with crypto only. CoinGecko's free API needs no key and covers
+  BTC/ETH directly; US stocks need a free-tier API key (Alpha Vantage)
+  or an unofficial/rate-limited source (Yahoo Finance), and MY stocks
+  are this doc's own acknowledged hardest case. Shipping
+  `getPortfolioSummary()` with crypto-only pricing first (falling back
+  to manual entry for US/MY holdings, per the Notes below) gets a
+  working `/portfolio` command out much sooner than blocking on all
+  three price sources at once.
+- `holdings` is already in the schema (per PLUTO-01) but has no
+  read/write path anywhere in `src/` yet — this module's `service.ts`
+  is genuinely a clean-slate CRUD layer, unlike expense/budget which
+  can lean on already-solved currency conversion and SGD normalization
+  from PLUTO-03.

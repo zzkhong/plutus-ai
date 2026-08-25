@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { buildAssistantReply, classifyUserMessage } from './ai';
 
-test('buildAssistantReply uses the user message details for expense replies', () => {
-  const reply = buildAssistantReply({
+test('buildAssistantReply uses the user message details for expense replies', async () => {
+  const reply = await buildAssistantReply({
     intent: 'expense',
     confidence: 0.96,
     extracted: {
@@ -20,8 +20,8 @@ test('buildAssistantReply uses the user message details for expense replies', ()
   assert.match(reply, /Food/i);
 });
 
-test('buildAssistantReply returns the generic error message when Gemini failed, not a guessed intent', () => {
-  const reply = buildAssistantReply({
+test('buildAssistantReply returns the generic error message when Gemini failed, not a guessed intent', async () => {
+  const reply = await buildAssistantReply({
     intent: 'unknown',
     confidence: 0,
     extracted: {},
