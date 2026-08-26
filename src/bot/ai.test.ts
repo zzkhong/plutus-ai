@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { buildAssistantReply, classifyUserMessage } from './ai';
-
 process.env.DATABASE_URL = './data/test-ai-budget.db';
 
 const aiTestDbPath = path.resolve('./data/test-ai-budget.db');
@@ -18,6 +16,7 @@ before(async () => {
 });
 
 test('buildAssistantReply uses the user message details for expense replies', async () => {
+  const { buildAssistantReply } = await import('./ai');
   const reply = await buildAssistantReply({
     intent: 'expense',
     confidence: 0.96,
@@ -35,6 +34,7 @@ test('buildAssistantReply uses the user message details for expense replies', as
 });
 
 test('buildAssistantReply returns the generic error message when Gemini failed, not a guessed intent', async () => {
+  const { buildAssistantReply } = await import('./ai');
   const reply = await buildAssistantReply({
     intent: 'unknown',
     confidence: 0,
@@ -53,6 +53,7 @@ test(
     // Pluto AI is Gemini-first with no rule-based fallback (see doc/tasks/02-telegram-bot.md),
     // so this exercises the real API using GOOGLE_API_KEY from the environment.
     // Opt-in only (RUN_LIVE_AI_TESTS=1): costs real API credits and needs network access.
+    const { classifyUserMessage } = await import('./ai');
     const result = await classifyUserMessage('Spent $4.50 at Ya Kun');
     assert.equal(result.intent, 'expense');
     assert.equal(result.serviceError, undefined);
@@ -66,6 +67,7 @@ test('classifyUserMessage degrades gracefully instead of guessing when the Gemin
   }) as typeof fetch;
 
   try {
+    const { classifyUserMessage } = await import('./ai');
     const result = await classifyUserMessage('Spent $4.50 at Ya Kun');
     assert.equal(result.intent, 'unknown');
     assert.equal(result.serviceError, true);
@@ -75,6 +77,7 @@ test('classifyUserMessage degrades gracefully instead of guessing when the Gemin
 });
 
 test('buildAssistantReply sets a real budget for the budget intent', async () => {
+  const { buildAssistantReply } = await import('./ai');
   const reply = await buildAssistantReply({
     intent: 'budget',
     confidence: 0.9,
@@ -92,6 +95,7 @@ test('buildAssistantReply sets a real budget for the budget intent', async () =>
 });
 
 test('buildAssistantReply removes a budget when the action indicates removal', async () => {
+  const { buildAssistantReply } = await import('./ai');
   const { setBudget, findBudgetByCategory } = await import('../budget/service');
   await setBudget('Travel', 200, 'SGD');
 
@@ -110,6 +114,7 @@ test('buildAssistantReply removes a budget when the action indicates removal', a
 });
 
 test('buildAssistantReply asks for a category when the budget intent has none', async () => {
+  const { buildAssistantReply } = await import('./ai');
   const reply = await buildAssistantReply({
     intent: 'budget',
     confidence: 0.5,
