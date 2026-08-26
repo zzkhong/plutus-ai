@@ -32,7 +32,7 @@ delivery.
 - [x] Budgets auto-reset on the 1st of each month (progress resets,
       budget amount persists)
 - [x] /budget command shows all budgets with current progress
-- [x] Budget status included in daily digest data
+- [ ] Budget status included in daily digest data
 
 ---
 
