@@ -1,7 +1,21 @@
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { buildAssistantReply, classifyUserMessage } from './ai';
+
+process.env.DATABASE_URL = './data/test-ai-budget.db';
+
+const aiTestDbPath = path.resolve('./data/test-ai-budget.db');
+if (fs.existsSync(aiTestDbPath)) {
+  fs.rmSync(aiTestDbPath, { force: true });
+}
+
+before(async () => {
+  const { runMigrations } = await import('../db/migrate');
+  runMigrations();
+});
 
 test('buildAssistantReply uses the user message details for expense replies', async () => {
   const reply = await buildAssistantReply({
@@ -58,4 +72,50 @@ test('classifyUserMessage degrades gracefully instead of guessing when the Gemin
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+test('buildAssistantReply sets a real budget for the budget intent', async () => {
+  const reply = await buildAssistantReply({
+    intent: 'budget',
+    confidence: 0.9,
+    extracted: { category: 'Food', budgetAmount: 800 },
+    rawText: 'Set food budget to $800/month',
+  });
+
+  assert.match(reply, /Food/);
+  assert.match(reply, /800\.00/);
+
+  const { findBudgetByCategory } = await import('../budget/service');
+  const budget = await findBudgetByCategory('Food');
+  assert.ok(budget);
+  assert.equal(budget!.amount_sgd, 80000);
+});
+
+test('buildAssistantReply removes a budget when the action indicates removal', async () => {
+  const { setBudget, findBudgetByCategory } = await import('../budget/service');
+  await setBudget('Travel', 200, 'SGD');
+
+  const reply = await buildAssistantReply({
+    intent: 'budget',
+    confidence: 0.9,
+    extracted: { category: 'Travel', action: 'remove' },
+    rawText: 'Remove my travel budget',
+  });
+
+  assert.match(reply, /removed/i);
+  assert.match(reply, /Travel/);
+
+  const budget = await findBudgetByCategory('Travel');
+  assert.equal(budget, null);
+});
+
+test('buildAssistantReply asks for a category when the budget intent has none', async () => {
+  const reply = await buildAssistantReply({
+    intent: 'budget',
+    confidence: 0.5,
+    extracted: {},
+    rawText: 'set a budget',
+  });
+
+  assert.match(reply, /which category/i);
 });
