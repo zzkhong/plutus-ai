@@ -19,21 +19,20 @@ and resets monthly. Budget status is included in the daily digest.
 
 ## Acceptance Criteria
 
-**Status: not started.** No `src/budget/` directory exists; `/budget`
-(src/bot/commands/budget.ts) is a hardcoded placeholder string. The
-`budgets` table exists in the schema but nothing reads or writes to it.
-None of the criteria below are implemented.
+**Status: implemented.** See `src/budget/`, the wired `/budget`
+command, the `budget` chat intent, and the recurring scheduler's alert
+delivery.
 
-- [ ] User can set budgets via chat: "Set food budget to $800/month"
-- [ ] User can update or remove budgets
-- [ ] Budget progress calculated from current month's spending in that
+- [x] User can set budgets via chat: "Set food budget to $800/month"
+- [x] User can update or remove budgets
+- [x] Budget progress calculated from current month's spending in that
       category
-- [ ] Alert triggered when 80% of budget is reached (sent once)
-- [ ] Alert triggered when budget is exceeded (sent once)
-- [ ] Budgets auto-reset on the 1st of each month (progress resets,
+- [x] Alert triggered when 80% of budget is reached (sent once)
+- [x] Alert triggered when budget is exceeded (sent once)
+- [x] Budgets auto-reset on the 1st of each month (progress resets,
       budget amount persists)
-- [ ] /budget command shows all budgets with current progress
-- [ ] Budget status included in daily digest data
+- [x] /budget command shows all budgets with current progress
+- [x] Budget status included in daily digest data
 
 ---
 
