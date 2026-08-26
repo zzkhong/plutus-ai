@@ -22,5 +22,5 @@ export async function handleTextMessage(message: string): Promise<string> {
     rawText: classification.rawText,
   });
 
-  return buildAssistantReply(classification);
+  return await buildAssistantReply(classification);
 }

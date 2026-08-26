@@ -20,6 +20,10 @@ movements into a single concise message.
 
 ## Acceptance Criteria
 
+**Status: not started.** No `src/digest/` directory exists, and there is
+no `node-cron` usage anywhere in `src/` despite it being a dependency.
+None of the criteria below are implemented.
+
 - [ ] Scheduler fires at 10 PM SGT daily (Asia/Singapore timezone)
 - [ ] Message includes today's total spending broken down by category
 - [ ] Message includes transaction count per category

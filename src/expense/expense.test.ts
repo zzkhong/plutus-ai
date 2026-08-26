@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,6 +9,11 @@ const testDbPath = path.resolve('./data/test-plutus.db');
 if (fs.existsSync(testDbPath)) {
   fs.rmSync(testDbPath, { force: true });
 }
+
+before(async () => {
+  const { runMigrations } = await import('../db/migrate');
+  runMigrations();
+});
 
 test('logExpense stores SGD-normalized value and detects local categories', async () => {
   const { logExpense, getSpendingSummary } = await import('./index');

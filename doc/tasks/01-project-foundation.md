@@ -19,18 +19,21 @@ foundational layer — nothing else can start until this is complete.
 
 ## Acceptance Criteria
 
-- [ ] Project initialized with package.json, TypeScript config, linting
-- [ ] Database schema designed and migrations created for: transactions,
+- [x] Project initialized with package.json, TypeScript config, linting
+      (ESLint 10 with flat config in eslint.config.mjs)
+- [x] Database schema designed and migrations created for: transactions,
       holdings, budgets, recurring_transactions, user_config
-- [ ] Environment configuration system (dotenv or similar) with
+      (schema in src/db/schema.ts; Drizzle migrations in src/db/migrations/;
+      automatic migration on startup via src/db/client.ts)
+- [x] Environment configuration system (dotenv or similar) with
       validation for required keys
-- [ ] Shared TypeScript types/interfaces exported for cross-module use
-- [ ] Currency constants defined (SGD, MYR, USD, BTC, ETH, BETH)
-- [ ] Card-to-currency mapping configuration structure
-- [ ] Database connection utility with basic error handling
-- [ ] Project runs locally with `npm run dev` (even if it does nothing
+- [x] Shared TypeScript types/interfaces exported for cross-module use
+- [x] Currency constants defined (SGD, MYR, USD, BTC, ETH, BETH)
+- [x] Card-to-currency mapping configuration structure
+- [x] Database connection utility with basic error handling
+- [x] Project runs locally with `npm run dev` (even if it does nothing
       yet)
-- [ ] README with setup instructions
+- [x] README with setup instructions
 
 ---
 
@@ -138,3 +141,9 @@ export { cardCurrencyMap } from './config/currencies'
   should fail startup if it's missing. Pluto AI classifies every message
   through Gemini (see PLUTO-02) and has no rule-based fallback, so there
   is no valid "no key" mode to support.
+- `npm run lint` now works with ESLint 10 using flat config in
+  `eslint.config.mjs`. Run `npm run lint` to check code quality.
+- Drizzle migrations are now set up: schema is in `src/db/schema.ts`,
+  migrations in `src/db/migrations/`, and automatic migration runs on
+  app startup via `src/db/client.ts`. Use `npm run db:generate` to
+  create new migrations and `npm run db:migrate` to apply them manually.

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { buildAssistantReply, classifyUserMessage } from './ai';
 
-test('buildAssistantReply uses the user message details for expense replies', () => {
-  const reply = buildAssistantReply({
+test('buildAssistantReply uses the user message details for expense replies', async () => {
+  const reply = await buildAssistantReply({
     intent: 'expense',
     confidence: 0.96,
     extracted: {
@@ -20,8 +20,8 @@ test('buildAssistantReply uses the user message details for expense replies', ()
   assert.match(reply, /Food/i);
 });
 
-test('buildAssistantReply returns the generic error message when Gemini failed, not a guessed intent', () => {
-  const reply = buildAssistantReply({
+test('buildAssistantReply returns the generic error message when Gemini failed, not a guessed intent', async () => {
+  const reply = await buildAssistantReply({
     intent: 'unknown',
     confidence: 0,
     extracted: {},
@@ -32,13 +32,18 @@ test('buildAssistantReply returns the generic error message when Gemini failed, 
   assert.match(reply, /hiccupped/i);
 });
 
-test('classifyUserMessage returns expense intent for a real Gemini call', async () => {
-  // Pluto AI is Gemini-first with no rule-based fallback (see doc/tasks/02-telegram-bot.md),
-  // so this exercises the real API using GOOGLE_API_KEY from the environment.
-  const result = await classifyUserMessage('Spent $4.50 at Ya Kun');
-  assert.equal(result.intent, 'expense');
-  assert.equal(result.serviceError, undefined);
-});
+test(
+  'classifyUserMessage returns expense intent for a real Gemini call',
+  { skip: !process.env.RUN_LIVE_AI_TESTS && 'set RUN_LIVE_AI_TESTS=1 to run this against the real Gemini API' },
+  async () => {
+    // Pluto AI is Gemini-first with no rule-based fallback (see doc/tasks/02-telegram-bot.md),
+    // so this exercises the real API using GOOGLE_API_KEY from the environment.
+    // Opt-in only (RUN_LIVE_AI_TESTS=1): costs real API credits and needs network access.
+    const result = await classifyUserMessage('Spent $4.50 at Ya Kun');
+    assert.equal(result.intent, 'expense');
+    assert.equal(result.serviceError, undefined);
+  },
+);
 
 test('classifyUserMessage degrades gracefully instead of guessing when the Gemini call fails', async () => {
   const originalFetch = global.fetch;

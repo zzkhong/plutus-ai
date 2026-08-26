@@ -111,7 +111,7 @@ export async function classifyUserMessage(rawText: string): Promise<IntentAnalys
   }
 }
 
-export function buildAssistantReply(result: IntentAnalysis): string {
+export async function buildAssistantReply(result: IntentAnalysis): Promise<string> {
   const { intent, extracted, rawText, serviceError } = result;
 
   if (serviceError) {
@@ -123,26 +123,50 @@ export function buildAssistantReply(result: IntentAnalysis): string {
       const amount = extracted.amount ?? 0;
       const merchant = extracted.merchant ?? 'your purchase';
       const category = extracted.category ?? 'Other';
-      return `Got it — I’ve flagged this as an expense of $${amount.toFixed(2)} at ${merchant} in ${category}. I’ll send it through the spending flow once the expense engine is connected.`;
+      return `Got it — I've flagged this as an expense of $${amount.toFixed(2)} at ${merchant} in ${category}. I'll send it through the spending flow once the expense engine is connected.`;
     }
     case 'budget': {
       const amount = extracted.budgetAmount ?? extracted.amount ?? 0;
       const category = extracted.category ?? 'your category';
-      return `Nice, that looks like a budget update for ${category}. I’ll set the target to $${amount.toFixed(2)} and keep it synced with your monthly plan.`;
+      return `Nice, that looks like a budget update for ${category}. I'll set the target to $${amount.toFixed(2)} and keep it synced with your monthly plan.`;
     }
     case 'correction': {
-      return `Thanks for the correction — I’ll treat that as a revision to the last entry instead of a fresh expense.`;
+      // Import dynamically to avoid circular dependencies
+      const { correctLastTransaction } = await import('../expense/service');
+
+      // Determine what field to correct based on extracted data
+      let field = 'category'; // default
+      let value = extracted.category || rawText;
+
+      if (extracted.merchant) {
+        field = 'merchant';
+        value = extracted.merchant;
+      } else if (extracted.amount) {
+        field = 'amount';
+        value = extracted.amount.toString();
+      } else if (extracted.category) {
+        field = 'category';
+        value = extracted.category;
+      }
+
+      const corrected = await correctLastTransaction(field, value);
+
+      if (!corrected) {
+        return `I couldn't find a recent transaction to correct. Try logging an expense first!`;
+      }
+
+      return `Updated! Changed ${field} to "${value}" for your last transaction.`;
     }
     case 'recurring': {
-      return `That sounds like a recurring item. I’ll keep it in the recurring flow and make sure it gets handled as a repeat expense.`;
+      return `That sounds like a recurring item. I'll keep it in the recurring flow and make sure it gets handled as a repeat expense.`;
     }
     case 'query': {
-      return `I can help with that: “${rawText}”. I’ll pull the relevant numbers and summarize the result for you once the data layer is live.`;
+      return `I can help with that: "${rawText}". I'll pull the relevant numbers and summarize the result for you once the data layer is live.`;
     }
     case 'help': {
-      return `Here’s what I can do: /portfolio, /today, /month, /budget, /export, /undo, /help. You can also just message me naturally.`;
+      return `Here's what I can do: /portfolio, /today, /month, /budget, /export, /undo, /help. You can also just message me naturally.`;
     }
     default:
-      return `I’m not totally sure what you mean there, but I’m happy to help. Try /help or send something like “Spent $4.50 at Ya Kun”.`;
+      return `I'm not totally sure what you mean there, but I'm happy to help. Try /help or send something like "Spent $4.50 at Ya Kun".`;
   }
 }

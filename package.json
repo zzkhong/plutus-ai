@@ -11,7 +11,10 @@
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write src/**/*.ts",
-    "test": "npx tsx --test src/bot/ai.test.ts src/expense/expense.test.ts"
+    "test": "npx tsx --test src/bot/ai.test.ts src/expense/expense.test.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:studio": "drizzle-kit studio"
   },
   "repository": {
     "type": "git",
@@ -38,12 +41,15 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.2.0",
+    "@types/node-cron": "^3.0.11",
     "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.67.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^10.8.1",
+    "globals": "^17.11.0",
     "prettier": "^3.9.6",
     "tsx": "^4.23.12"
   }
