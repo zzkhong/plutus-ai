@@ -8,6 +8,13 @@
       "when": 1787673282432,
       "tag": "0000_wooden_doctor_octopus",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787759898187,
+      "tag": "0001_sleepy_psynapse",
+      "breakpoints": true
     }
   ]
 }
