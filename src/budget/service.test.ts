@@ -2,6 +2,7 @@ import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 process.env.DATABASE_URL = './data/test-budget-service.db';
 
@@ -77,4 +78,31 @@ test('findBudgetByCategory returns the budget when one exists', async () => {
   const found = await findBudgetByCategory('Groceries');
   assert.ok(found);
   assert.equal(found!.amount_sgd, 40000);
+});
+
+test('removeBudget succeeds and cascades even after an alert has fired for that budget', async () => {
+  const { setBudget, removeBudget, findBudgetByCategory } = await import('./service');
+  const { db } = await import('../db');
+  const { budget_alerts } = await import('../db/schema');
+  const { eq } = await import('drizzle-orm');
+
+  const budget = await setBudget('Bills', 150, 'SGD');
+
+  // Simulate an alert having already fired this month for this budget, which
+  // is what previously made the FK constraint reject removeBudget's delete.
+  await db.insert(budget_alerts).values({
+    id: randomUUID(),
+    budget_id: budget.id,
+    threshold: 80,
+    month: '2026-08',
+    sent_at: Date.now(),
+  });
+
+  await assert.doesNotReject(() => removeBudget('Bills'));
+
+  const remainingBudget = await findBudgetByCategory('Bills');
+  assert.equal(remainingBudget, null);
+
+  const remainingAlerts = await db.select().from(budget_alerts).where(eq(budget_alerts.budget_id, budget.id));
+  assert.equal(remainingAlerts.length, 0);
 });

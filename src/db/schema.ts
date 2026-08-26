@@ -69,7 +69,7 @@ export const budget_alerts = sqliteTable('budget_alerts', {
   id: text('id').primaryKey(),
   budget_id: text('budget_id')
     .notNull()
-    .references(() => budgets.id),
+    .references(() => budgets.id, { onDelete: 'cascade' }),
   threshold: integer('threshold').notNull(), // 80 or 100
   month: text('month').notNull(), // 'YYYY-MM'
   sent_at: integer('sent_at')
