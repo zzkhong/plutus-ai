@@ -37,7 +37,12 @@ async function initialize(): Promise<void> {
     let plutoBot: PlutoBot | null = null;
     if (config.TELEGRAM_BOT_TOKEN) {
       plutoBot = new PlutoBot();
-      await plutoBot.start();
+      // Do not await: Bot.start() runs grammy's long-polling loop and does not
+      // resolve until the bot is stopped. Awaiting it here would block every line
+      // below (the recurring scheduler, budget alert delivery) from ever running.
+      plutoBot.start().catch((error) => {
+        logger.error('Telegram bot failed to start', error);
+      });
       logger.info('Telegram bot core initialized');
     } else {
       logger.warn('Telegram bot not started because TELEGRAM_BOT_TOKEN is not configured');
