@@ -20,6 +20,10 @@ SGD, allocation percentages, and daily movements.
 
 ## Acceptance Criteria
 
+**Status: not started.** No `src/portfolio/` directory exists; `/portfolio`
+(src/bot/commands/portfolio.ts) is a hardcoded placeholder string. None of
+the criteria below are implemented.
+
 - [ ] User can add/remove holdings via chat ("Add 10 AAPL", "Remove
       CIMB")
 - [ ] US stock prices fetched from a free API (Yahoo Finance, Alpha

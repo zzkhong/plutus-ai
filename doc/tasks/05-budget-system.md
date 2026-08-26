@@ -19,6 +19,11 @@ and resets monthly. Budget status is included in the daily digest.
 
 ## Acceptance Criteria
 
+**Status: not started.** No `src/budget/` directory exists; `/budget`
+(src/bot/commands/budget.ts) is a hardcoded placeholder string. The
+`budgets` table exists in the schema but nothing reads or writes to it.
+None of the criteria below are implemented.
+
 - [ ] User can set budgets via chat: "Set food budget to $800/month"
 - [ ] User can update or remove budgets
 - [ ] Budget progress calculated from current month's spending in that

@@ -19,44 +19,17 @@ import {
   SpendingSummary,
 } from './types';
 
-function ensureExpenseTables(db: Database.Database): void {
+function ensureDataDirectory(): void {
   const dataDir = path.dirname(config.DATABASE_URL);
   if (dataDir && dataDir !== '.') {
     fs.mkdirSync(dataDir, { recursive: true });
   }
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS transactions (
-      id TEXT PRIMARY KEY,
-      amount INTEGER NOT NULL,
-      currency TEXT NOT NULL,
-      amount_sgd INTEGER NOT NULL,
-      merchant TEXT NOT NULL,
-      category TEXT NOT NULL,
-      source TEXT NOT NULL,
-      card_name TEXT NOT NULL,
-      note TEXT,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    );
-
-    CREATE TABLE IF NOT EXISTS recurring_transactions (
-      id TEXT PRIMARY KEY,
-      amount INTEGER NOT NULL,
-      currency TEXT NOT NULL,
-      merchant TEXT NOT NULL,
-      category TEXT NOT NULL,
-      day_of_month INTEGER NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
-    );
-  `);
 }
 
 function getSQLiteDb(): Database.Database {
+  ensureDataDirectory();
   const db = new Database(config.DATABASE_URL);
-  ensureExpenseTables(db);
+  // Tables are created via Drizzle migrations (see src/db/migrations/)
   return db;
 }
 
@@ -111,7 +84,7 @@ export async function logExpense(data: ExpenseInput): Promise<Transaction> {
 
   const amountCents = centsFromAmount(data.amount);
   const merchant = (data.merchant ?? 'Unknown merchant').trim() || 'Unknown merchant';
-  const category = inferCategory({ merchant, note: data.note }) as Category;
+  const category = await inferCategory({ merchant, note: data.note, amount: amountCents });
   const now = Date.now();
   const id = randomUUID();
   const amountSgd = toSGD(amountCents, normalizedCurrency);
@@ -209,7 +182,7 @@ export async function compareSpending(period1: SpendingPeriod, period2: Spending
 export async function createRecurring(data: RecurringInput): Promise<any> {
   const db = getSQLiteDb();
   const amount = centsFromAmount(data.amount);
-  const category = data.category ?? inferCategory({ merchant: data.merchant });
+  const category = data.category ?? (await inferCategory({ merchant: data.merchant, amount }));
   const id = randomUUID();
   const now = Date.now();
 
@@ -317,7 +290,7 @@ export async function correctLastTransaction(field: string, value: string): Prom
     updateSql += ', merchant = ?';
     params.push(value);
   } else if (normalizedField === 'category') {
-    const category = inferCategory({ merchant: row.merchant, note: value }) as Category;
+    const category = await inferCategory({ merchant: row.merchant, note: value, amount: row.amount });
     updateSql += ', category = ?';
     params.push(category);
   } else if (normalizedField === 'note') {

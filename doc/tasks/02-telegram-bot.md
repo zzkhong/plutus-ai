@@ -26,16 +26,21 @@ context-aware replies.
 
 ## Acceptance Criteria
 
-- [ ] Bot connects to Telegram and responds as a conversational AI assistant
-- [ ] Command routing works for all defined commands (/portfolio,
+- [x] Bot connects to Telegram and responds as a conversational AI assistant
+- [x] Command routing works for all defined commands (/portfolio,
       /today, /month, /budget, /export, /undo, /help)
-- [ ] Free-text messages are sent to Gemini for intent classification,
+- [x] Free-text messages are sent to Gemini for intent classification,
       structured extraction, and natural-language response generation
+- [x] Correction intent ("last one was transport not food") is now wired
+      to call correctLastTransaction() and update the most recent transaction
+      (src/bot/ai.ts buildAssistantReply)
 - [ ] Voice messages are transcribed and processed as text before the
       same AI flow
-- [ ] Bot responds with polished, contextual messages (Markdown or HTML)
-- [ ] Error handling: graceful failures with user-friendly messages
-- [ ] Bot ignores messages from non-authorized users (single-user
+      (src/bot/handlers/voice.ts is a stub — it returns a placeholder
+      string and never transcribes or routes into classifyUserMessage)
+- [x] Bot responds with polished, contextual messages (Markdown or HTML)
+- [x] Error handling: graceful failures with user-friendly messages
+- [x] Bot ignores messages from non-authorized users (single-user
       security)
 
 ---

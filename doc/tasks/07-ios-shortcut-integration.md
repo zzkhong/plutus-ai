@@ -21,6 +21,10 @@ manual effort.
 
 ## Acceptance Criteria
 
+**Status: not started.** No `src/webhook/` directory exists, and there is
+no HTTP server usage anywhere in `src/` despite `hono` being a dependency.
+None of the criteria below are implemented.
+
 - [ ] HTTP POST endpoint accepts transaction data from iOS Shortcut
 - [ ] Endpoint is secured (API key or shared secret in header)
 - [ ] Payload includes: amount, merchant name, card name used

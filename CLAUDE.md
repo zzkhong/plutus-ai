@@ -26,7 +26,7 @@ npx tsx --test --test-name-pattern="undoLastTransaction" src/expense/expense.tes
 
 New test files must be added explicitly to the `test` script in [package.json](package.json) or they won't run.
 
-[src/bot/ai.test.ts](src/bot/ai.test.ts) makes a real call to the Gemini API using `GOOGLE_API_KEY` from `.env` to verify classification end-to-end (there's no mocking seam for the SDK) — it needs network access and a working key, and will fail without either. Its "Gemini call fails" test stubs `global.fetch` instead, so it doesn't need network.
+[src/bot/ai.test.ts](src/bot/ai.test.ts)'s "real Gemini call" test is skipped by default (there's no mocking seam for the SDK, and it costs real API credits + is non-deterministic) — set `RUN_LIVE_AI_TESTS=1` to opt in, which requires network access and a working `GOOGLE_API_KEY`. Every other test in that file, including the "Gemini call fails" case, stubs `global.fetch` and runs by default without network.
 
 `npm run lint` is currently broken on a clean checkout: the installed `eslint@^10` requires a flat `eslint.config.js`, but the repo still ships the legacy [.eslintrc.js](.eslintrc.js). This is a pre-existing issue, not introduced by any particular change — fix it (migrate the config or pin eslint to v8) before relying on lint output.
 
