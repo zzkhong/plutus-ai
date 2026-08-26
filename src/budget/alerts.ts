@@ -16,6 +16,8 @@ function currentMonthKey(now = new Date()): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
+// Dedup is recorded on detection, not on confirmed delivery — a send failure after
+// this point means the alert is not retried until next month's dedup key resets.
 async function markAlertSent(budgetId: string, threshold: 80 | 100, month: string): Promise<boolean> {
   const existing = await db
     .select()

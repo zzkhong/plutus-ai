@@ -91,3 +91,29 @@ test('deliverBudgetAlerts sends a message when a transaction crosses a threshold
   assert.equal(sent[0].chatId, 'test-chat-id');
   assert.match(sent[0].text, /Entertainment/);
 });
+
+test('deliverBudgetAlerts keeps processing later transactions after sendMessage throws for an earlier one', async () => {
+  const { setBudget } = await import('../budget/service');
+  const { deliverBudgetAlerts } = await import('./recurring');
+
+  await setBudget('Bills', 100, 'SGD');
+  await setBudget('Health', 100, 'SGD');
+
+  const failing = await insertTransaction('Bills', 8500); // crosses 80%, send will throw
+  const healthy = await insertTransaction('Health', 8500); // also crosses 80%, send should succeed
+
+  const sent: Array<{ chatId: string; text: string }> = [];
+  const fakeApi = {
+    sendMessage: async (chatId: string, text: string) => {
+      if (text.includes('Bills')) {
+        throw new Error('simulated Telegram send failure');
+      }
+      sent.push({ chatId, text });
+    },
+  } as any;
+
+  await assert.doesNotReject(() => deliverBudgetAlerts(fakeApi, [failing, healthy]));
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /Health/);
+});

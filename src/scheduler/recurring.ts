@@ -36,7 +36,11 @@ export async function deliverBudgetAlerts(api: Api | null, transactions: Transac
   for (const transaction of transactions) {
     const alert = await checkAlerts(transaction);
     if (alert) {
-      await api.sendMessage(config.TELEGRAM_AUTHORIZED_CHAT_ID, alert.message);
+      try {
+        await api.sendMessage(config.TELEGRAM_AUTHORIZED_CHAT_ID, alert.message);
+      } catch (error) {
+        logger.error('Failed to deliver budget alert', error);
+      }
     }
   }
 }
