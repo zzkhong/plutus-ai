@@ -126,9 +126,28 @@ export async function buildAssistantReply(result: IntentAnalysis): Promise<strin
       return `Got it — I've flagged this as an expense of $${amount.toFixed(2)} at ${merchant} in ${category}. I'll send it through the spending flow once the expense engine is connected.`;
     }
     case 'budget': {
+      const { setBudget, removeBudget } = await import('../budget/service');
+      const { normalizeCategoryName } = await import('../expense/categorizer');
+
+      if (!extracted.category) {
+        return `Sure — which category's budget should I update? Try "Set food budget to $800/month".`;
+      }
+
+      const category = normalizeCategoryName(extracted.category);
+      const isRemoval = /remove|delete|cancel/i.test(extracted.action ?? rawText);
+
+      if (isRemoval) {
+        await removeBudget(category);
+        return `Done — removed the ${category} budget.`;
+      }
+
       const amount = extracted.budgetAmount ?? extracted.amount ?? 0;
-      const category = extracted.category ?? 'your category';
-      return `Nice, that looks like a budget update for ${category}. I'll set the target to $${amount.toFixed(2)} and keep it synced with your monthly plan.`;
+      if (amount <= 0) {
+        return `What amount should the ${category} budget be? Try "Set food budget to $800/month".`;
+      }
+
+      const budget = await setBudget(category, amount);
+      return `Got it — ${category} budget set to S$${(budget.amount_sgd / 100).toFixed(2)}/month.`;
     }
     case 'correction': {
       // Import dynamically to avoid circular dependencies

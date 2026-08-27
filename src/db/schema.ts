@@ -64,6 +64,19 @@ export const budgets = sqliteTable('budgets', {
     .default(sql`(unixepoch() * 1000)`),
 });
 
+// Budget alert dedup table — one row per (budget, threshold, month) once sent
+export const budget_alerts = sqliteTable('budget_alerts', {
+  id: text('id').primaryKey(),
+  budget_id: text('budget_id')
+    .notNull()
+    .references(() => budgets.id, { onDelete: 'cascade' }),
+  threshold: integer('threshold').notNull(), // 80 or 100
+  month: text('month').notNull(), // 'YYYY-MM'
+  sent_at: integer('sent_at')
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+});
+
 // Recurring transactions table
 export const recurring_transactions = sqliteTable('recurring_transactions', {
   id: text('id').primaryKey(),

@@ -34,20 +34,26 @@ async function initialize(): Promise<void> {
     logger.info(`Database: ${config.DATABASE_URL}`);
     logger.info(`Log Level: ${config.LOG_LEVEL}`);
 
+    let plutoBot: PlutoBot | null = null;
     if (config.TELEGRAM_BOT_TOKEN) {
-      const bot = new PlutoBot();
-      await bot.start();
+      plutoBot = new PlutoBot();
+      // Do not await: Bot.start() runs grammy's long-polling loop and does not
+      // resolve until the bot is stopped. Awaiting it here would block every line
+      // below (the recurring scheduler, budget alert delivery) from ever running.
+      plutoBot.start().catch((error) => {
+        logger.error('Telegram bot failed to start', error);
+      });
       logger.info('Telegram bot core initialized');
     } else {
       logger.warn('Telegram bot not started because TELEGRAM_BOT_TOKEN is not configured');
     }
 
     // Start recurring transactions scheduler
-    startRecurringScheduler();
+    startRecurringScheduler(plutoBot ? plutoBot.getBot() : null);
 
     // Check and fire any recurring transactions that may have been missed during downtime
     logger.info('Checking for recurring transactions due today...');
-    await triggerRecurringNow();
+    await triggerRecurringNow(plutoBot ? plutoBot.getBot() : null);
 
     logger.info('Recurring transactions scheduler running (daily at 00:00)');
   } catch (error) {
