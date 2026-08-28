@@ -184,3 +184,32 @@ test('generateSummaryLine falls back to "All good." when no budget is over thres
   const line = await generateSummaryLine(data as any);
   assert.equal(line, 'All good.');
 });
+
+test('triggerDigestNow does not throw when no bot is available', async () => {
+  const { triggerDigestNow } = await import('./index');
+  await assert.doesNotReject(() => triggerDigestNow(null));
+});
+
+test('triggerDigestNow sends the built digest message through the bot api', async () => {
+  const { triggerDigestNow } = await import('./index');
+  const sent: Array<{ chatId: string; text: string }> = [];
+  const fakeBot = {
+    api: {
+      sendMessage: async (chatId: string, text: string) => {
+        sent.push({ chatId, text });
+      },
+    },
+  } as any;
+
+  await triggerDigestNow(fakeBot);
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].chatId, 'test-chat-id');
+  assert.match(sent[0].text, /Daily Digest/);
+});
+
+test('buildDigestMessage returns a string containing the digest header', async () => {
+  const { buildDigestMessage } = await import('./index');
+  const message = await buildDigestMessage();
+  assert.match(message, /^Daily Digest - /);
+});
