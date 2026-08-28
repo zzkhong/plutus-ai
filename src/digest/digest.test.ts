@@ -145,3 +145,42 @@ test('formatDigestMessage renders a failed section as unavailable with its reaso
   const message = formatDigestMessage(data as any, 'All good.');
   assert.match(message, /Spending: unavailable \(db locked\)/);
 });
+
+test('generateSummaryLine falls back to "Watch {category} spending." when a budget is at or above 80%', async () => {
+  const { generateSummaryLine } = await import('./summary');
+
+  const data = {
+    spending: emptySpending(),
+    recurringFired: [],
+    budgetStatuses: [
+      {
+        category: 'Food',
+        budget_amount: 10000,
+        budget_currency: 'SGD',
+        budget_sgd: 10000,
+        spent_sgd: 9000,
+        percentage: 90,
+        remaining_sgd: 1000,
+        days_left_in_month: 2,
+      },
+    ],
+    portfolio: { error: 'not yet implemented' },
+  };
+
+  const line = await generateSummaryLine(data as any);
+  assert.equal(line, 'Watch Food spending.');
+});
+
+test('generateSummaryLine falls back to "All good." when no budget is over threshold', async () => {
+  const { generateSummaryLine } = await import('./summary');
+
+  const data = {
+    spending: emptySpending(),
+    recurringFired: [],
+    budgetStatuses: [],
+    portfolio: { error: 'not yet implemented' },
+  };
+
+  const line = await generateSummaryLine(data as any);
+  assert.equal(line, 'All good.');
+});
