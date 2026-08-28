@@ -276,6 +276,16 @@ export async function fireRecurringForToday(): Promise<Transaction[]> {
   return created;
 }
 
+export async function getRecurringFiredToday(): Promise<Transaction[]> {
+  const db = getSQLiteDb();
+  const start = startOfPeriod('today');
+  const rows = db
+    .prepare("SELECT * FROM transactions WHERE source = 'recurring' AND created_at >= ? ORDER BY created_at DESC")
+    .all(start) as any[];
+  db.close();
+  return rows.map((row) => mapTransactionRow(row));
+}
+
 export async function correctLastTransaction(field: string, value: string): Promise<Transaction | null> {
   const db = getSQLiteDb();
   const row = db.prepare('SELECT * FROM transactions ORDER BY created_at DESC LIMIT 1').get() as any;
