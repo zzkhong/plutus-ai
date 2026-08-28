@@ -18,6 +18,7 @@ export function formatHelpMessage(): string {
     '/budget - budget status',
     '/export - export your data',
     '/undo - undo the last transaction',
+    '/digest - preview tonight\'s digest',
     '/help - this menu',
     '',
     'Or just message me naturally, like “Spent $4.50 at Ya Kun”.',

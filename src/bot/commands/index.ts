@@ -3,6 +3,7 @@
  */
 
 export * from './portfolio';
+export * from './digest';
 export * from './today';
 export * from './month';
 export * from './budget';
