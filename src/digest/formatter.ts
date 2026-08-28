@@ -26,7 +26,8 @@ function formatSpendingSection(section: DigestData['spending']): string {
   }
 
   const lines = [`Spent today: ${money(section.total)}`];
-  for (const [category, amount] of Object.entries(section.byCategory)) {
+  const sortedCategories = Object.entries(section.byCategory).sort((a, b) => b[1] - a[1]);
+  for (const [category, amount] of sortedCategories) {
     const count = section.byCategoryCount[category] ?? 0;
     const label = count === 1 ? 'txn' : 'txns';
     lines.push(`  ${category}: ${money(amount)} (${count} ${label})`);

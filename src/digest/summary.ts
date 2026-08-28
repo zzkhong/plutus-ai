@@ -42,19 +42,26 @@ export async function generateSummaryLine(data: DigestData): Promise<string> {
         'You are Pluto AI, a personal finance assistant. Reply with exactly one short plain-text sentence, no markdown, no quotes.',
     });
 
+    let timeoutHandle: NodeJS.Timeout;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Gemini summary call timed out after 5s')), 5000);
+      timeoutHandle = setTimeout(() => reject(new Error('Gemini summary call timed out after 5s')), 5000);
     });
 
-    const result = await Promise.race([model.generateContent(buildPrompt(data)), timeoutPromise]);
-    const text = result.response.text().trim();
+    try {
+      const result = await Promise.race([model.generateContent(buildPrompt(data)), timeoutPromise]);
+      clearTimeout(timeoutHandle!);
+      const text = result.response.text().trim();
 
-    if (!text) {
-      logger.warn('Gemini returned an empty digest summary, falling back to rule-based line');
-      return ruleBasedSummary(data);
+      if (!text) {
+        logger.warn('Gemini returned an empty digest summary, falling back to rule-based line');
+        return ruleBasedSummary(data);
+      }
+
+      return text;
+    } catch (error) {
+      clearTimeout(timeoutHandle!);
+      throw error;
     }
-
-    return text;
   } catch (error) {
     logger.error('Gemini digest summary failed, falling back to rule-based line', error);
     return ruleBasedSummary(data);

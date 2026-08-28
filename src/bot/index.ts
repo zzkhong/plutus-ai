@@ -31,7 +31,7 @@ export class PlutoBot {
   }
 
   private async replyWithText(ctx: Context, text: string): Promise<void> {
-    await ctx.reply(text, { parse_mode: 'Markdown' });
+    await ctx.reply(text);
   }
 
   public async start(): Promise<void> {

@@ -89,12 +89,15 @@ Edit `.env` with your configuration:
 
 ```env
 NODE_ENV=development
+TZ=Asia/Singapore
 DATABASE_URL=./data/pluto.db
 TELEGRAM_BOT_TOKEN=your_token_here
 GOOGLE_API_KEY=your_api_key_here
 LOG_LEVEL=info
 PORT=3000
 ```
+
+`TZ` must be set to `Asia/Singapore` so the process computes "today" boundaries (used by expense summaries and the daily digest) in the same timezone as the digest's 10pm SGT cron schedule.
 
 ## Usage
 

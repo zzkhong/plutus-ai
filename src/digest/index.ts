@@ -19,9 +19,6 @@ export async function buildDigestMessage(): Promise<string> {
 }
 
 export async function triggerDigestNow(bot: Bot | null): Promise<void> {
-  logger.info('Building daily digest');
-  const message = await buildDigestMessage();
-
   if (!bot) {
     logger.warn('Skipping digest delivery: no bot instance available');
     return;
@@ -31,6 +28,9 @@ export async function triggerDigestNow(bot: Bot | null): Promise<void> {
     logger.warn('Skipping digest delivery: TELEGRAM_AUTHORIZED_CHAT_ID is not configured');
     return;
   }
+
+  logger.info('Building daily digest');
+  const message = await buildDigestMessage();
 
   try {
     await bot.api.sendMessage(config.TELEGRAM_AUTHORIZED_CHAT_ID, message);
