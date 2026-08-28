@@ -71,3 +71,39 @@ test('recurring transactions can be fired for today', async () => {
   const fired = await fireRecurringForToday();
   assert.ok(fired.some((item) => item.merchant === recurring.merchant));
 });
+
+test('getSpendingSummary tracks a per-category transaction count', async () => {
+  const { logExpense, getSpendingSummary } = await import('./index');
+  const before = await getSpendingSummary('today');
+  const beforeCount = before.byCategoryCount.Entertainment ?? 0;
+
+  await logExpense({ amount: 10, currency: 'SGD', merchant: 'Netflix subscription', source: 'text' });
+  await logExpense({ amount: 10, currency: 'SGD', merchant: 'Netflix subscription', source: 'text' });
+
+  const after = await getSpendingSummary('today');
+  assert.equal(after.byCategoryCount.Entertainment, beforeCount + 2);
+
+  const totalFromCounts = Object.values(after.byCategoryCount).reduce((sum, n) => sum + n, 0);
+  assert.equal(totalFromCounts, after.count);
+});
+
+test('getRecurringFiredToday reports already-fired recurring transactions without inserting new ones', async () => {
+  const { createRecurring, fireRecurringForToday, getRecurringFiredToday } = await import('./index');
+  const recurring = await createRecurring({
+    amount: 500,
+    currency: 'SGD',
+    merchant: 'Spotify',
+    category: 'Entertainment',
+    day_of_month: new Date().getDate(),
+    is_active: true,
+  });
+
+  await fireRecurringForToday();
+
+  const first = await getRecurringFiredToday();
+  const second = await getRecurringFiredToday();
+
+  assert.equal(first.length, second.length);
+  assert.ok(first.some((t) => t.merchant === recurring.merchant));
+  assert.ok(first.every((t) => t.source === 'recurring'));
+});

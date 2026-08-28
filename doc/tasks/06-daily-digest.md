@@ -20,21 +20,22 @@ movements into a single concise message.
 
 ## Acceptance Criteria
 
-**Status: not started.** No `src/digest/` directory exists, and there is
-no `node-cron` usage anywhere in `src/` despite it being a dependency.
-None of the criteria below are implemented.
+**Status: implemented**, except portfolio net worth and market
+movements, which are blocked on PLUTO-04 (Portfolio Tracker) — that
+module doesn't exist yet, so the digest's portfolio section is a
+permanent "unavailable" placeholder until it's built.
 
-- [ ] Scheduler fires at 10 PM SGT daily (Asia/Singapore timezone)
-- [ ] Message includes today's total spending broken down by category
-- [ ] Message includes transaction count per category
-- [ ] Message includes budget status for any category with a budget set
-- [ ] Message includes portfolio net worth in SGD
-- [ ] Message includes notable stock/crypto movements (> 1% change)
-- [ ] Message includes any recurring transactions that fired today
-- [ ] Message is concise, well-formatted, and easy to scan
-- [ ] If no spending today, message acknowledges it ("No spending
+- [x] Scheduler fires at 10 PM SGT daily (Asia/Singapore timezone)
+- [x] Message includes today's total spending broken down by category
+- [x] Message includes transaction count per category
+- [x] Message includes budget status for any category with a budget set
+- [ ] Message includes portfolio net worth in SGD — blocked on PLUTO-04
+- [ ] Message includes notable stock/crypto movements (> 1% change) — blocked on PLUTO-04
+- [x] Message includes any recurring transactions that fired today
+- [x] Message is concise, well-formatted, and easy to scan
+- [x] If no spending today, message acknowledges it ("No spending
       today")
-- [ ] Digest still sends even if one data source fails (graceful
+- [x] Digest still sends even if one data source fails (graceful
       degradation)
 
 ---

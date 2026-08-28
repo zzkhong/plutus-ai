@@ -14,6 +14,7 @@ import { handleMonthCommand } from './commands/month';
 import { handleBudgetCommand } from './commands/budget';
 import { handleExportCommand } from './commands/export';
 import { handleUndoCommand } from './commands/undo';
+import { handleDigestCommand } from './commands/digest';
 import { handleHelpCommand } from './commands/help';
 import { handleTextMessage } from './handlers/text';
 import { handleVoiceMessage } from './handlers/voice';
@@ -30,7 +31,7 @@ export class PlutoBot {
   }
 
   private async replyWithText(ctx: Context, text: string): Promise<void> {
-    await ctx.reply(text, { parse_mode: 'Markdown' });
+    await ctx.reply(text);
   }
 
   public async start(): Promise<void> {
@@ -71,6 +72,11 @@ export class PlutoBot {
 
     this.bot.command('undo', async (ctx) => {
       const response = await handleUndoCommand();
+      await this.replyWithText(ctx, response);
+    });
+
+    this.bot.command('digest', async (ctx) => {
+      const response = await handleDigestCommand();
       await this.replyWithText(ctx, response);
     });
 

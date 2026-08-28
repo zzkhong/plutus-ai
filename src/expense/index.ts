@@ -11,6 +11,7 @@ export {
   createRecurring,
   exportCSV,
   fireRecurringForToday,
+  getRecurringFiredToday,
   getSpendingByCategory,
   getSpendingSummary,
   getTopExpenses,

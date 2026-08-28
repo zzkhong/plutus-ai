@@ -134,12 +134,14 @@ export async function getSpendingSummary(period: SpendingPeriod): Promise<Spendi
     .all(start) as any[];
 
   const byCategory: Record<string, number> = {};
+  const byCategoryCount: Record<string, number> = {};
   let total = 0;
 
   for (const row of rows) {
     total += Number(row.amount_sgd);
     const category = String(row.category);
     byCategory[category] = (byCategory[category] ?? 0) + Number(row.amount_sgd);
+    byCategoryCount[category] = (byCategoryCount[category] ?? 0) + 1;
   }
 
   const summary: SpendingSummary = {
@@ -147,6 +149,7 @@ export async function getSpendingSummary(period: SpendingPeriod): Promise<Spendi
     total,
     count: rows.length,
     byCategory,
+    byCategoryCount,
     topExpenses: rows.slice(0, 5).map((row) => mapTransactionRow(row)),
   };
 
@@ -271,6 +274,16 @@ export async function fireRecurringForToday(): Promise<Transaction[]> {
 
   db.close();
   return created;
+}
+
+export async function getRecurringFiredToday(): Promise<Transaction[]> {
+  const db = getSQLiteDb();
+  const start = startOfPeriod('today');
+  const rows = db
+    .prepare("SELECT * FROM transactions WHERE source = 'recurring' AND created_at >= ? ORDER BY created_at DESC")
+    .all(start) as any[];
+  db.close();
+  return rows.map((row) => mapTransactionRow(row));
 }
 
 export async function correctLastTransaction(field: string, value: string): Promise<Transaction | null> {
