@@ -30,6 +30,7 @@ export interface SpendingSummary {
   total: number;
   count: number;
   byCategory: Record<string, number>;
+  byCategoryCount: Record<string, number>;
   topExpenses: Transaction[];
 }
 

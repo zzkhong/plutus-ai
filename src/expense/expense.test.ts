@@ -71,3 +71,18 @@ test('recurring transactions can be fired for today', async () => {
   const fired = await fireRecurringForToday();
   assert.ok(fired.some((item) => item.merchant === recurring.merchant));
 });
+
+test('getSpendingSummary tracks a per-category transaction count', async () => {
+  const { logExpense, getSpendingSummary } = await import('./index');
+  const before = await getSpendingSummary('today');
+  const beforeCount = before.byCategoryCount.Entertainment ?? 0;
+
+  await logExpense({ amount: 10, currency: 'SGD', merchant: 'Netflix subscription', source: 'text' });
+  await logExpense({ amount: 10, currency: 'SGD', merchant: 'Netflix subscription', source: 'text' });
+
+  const after = await getSpendingSummary('today');
+  assert.equal(after.byCategoryCount.Entertainment, beforeCount + 2);
+
+  const totalFromCounts = Object.values(after.byCategoryCount).reduce((sum, n) => sum + n, 0);
+  assert.equal(totalFromCounts, after.count);
+});

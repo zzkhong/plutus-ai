@@ -134,12 +134,14 @@ export async function getSpendingSummary(period: SpendingPeriod): Promise<Spendi
     .all(start) as any[];
 
   const byCategory: Record<string, number> = {};
+  const byCategoryCount: Record<string, number> = {};
   let total = 0;
 
   for (const row of rows) {
     total += Number(row.amount_sgd);
     const category = String(row.category);
     byCategory[category] = (byCategory[category] ?? 0) + Number(row.amount_sgd);
+    byCategoryCount[category] = (byCategoryCount[category] ?? 0) + 1;
   }
 
   const summary: SpendingSummary = {
@@ -147,6 +149,7 @@ export async function getSpendingSummary(period: SpendingPeriod): Promise<Spendi
     total,
     count: rows.length,
     byCategory,
+    byCategoryCount,
     topExpenses: rows.slice(0, 5).map((row) => mapTransactionRow(row)),
   };
 
