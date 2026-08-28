@@ -50,3 +50,98 @@ test('collectDigestData returns real data for all live sources and a permanent p
   assert.ok(Array.isArray(data.budgetStatuses));
   assert.deepEqual(data.portfolio, { error: 'not yet implemented' });
 });
+
+function emptySpending() {
+  return { period: 'today' as const, total: 0, count: 0, byCategory: {}, byCategoryCount: {}, topExpenses: [] };
+}
+
+test('formatDigestMessage renders "no spending today" when total is zero', async () => {
+  const { formatDigestMessage } = await import('./formatter');
+
+  const data = {
+    spending: emptySpending(),
+    recurringFired: [],
+    budgetStatuses: [],
+    portfolio: { error: 'not yet implemented' },
+  };
+
+  const message = formatDigestMessage(data as any, 'All good.');
+  assert.match(message, /no spending today/i);
+});
+
+test('formatDigestMessage omits Budget/Auto-logged when empty and renders them when present', async () => {
+  const { formatDigestMessage } = await import('./formatter');
+
+  const baseData = {
+    spending: { period: 'today' as const, total: 1000, count: 1, byCategory: { Food: 1000 }, byCategoryCount: { Food: 1 }, topExpenses: [] },
+    recurringFired: [],
+    budgetStatuses: [],
+    portfolio: { error: 'not yet implemented' },
+  };
+
+  const emptyMessage = formatDigestMessage(baseData as any, 'All good.');
+  assert.doesNotMatch(emptyMessage, /Auto-logged/);
+  assert.doesNotMatch(emptyMessage, /Budget:/);
+
+  const filledData = {
+    ...baseData,
+    recurringFired: [
+      {
+        id: '1',
+        amount: 1500,
+        currency: 'SGD',
+        amount_sgd: 1500,
+        merchant: 'Netflix',
+        category: 'Entertainment',
+        source: 'recurring',
+        card_name: 'Recurring',
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ],
+    budgetStatuses: [
+      {
+        category: 'Food',
+        budget_amount: 10000,
+        budget_currency: 'SGD',
+        budget_sgd: 10000,
+        spent_sgd: 6250,
+        percentage: 62.5,
+        remaining_sgd: 3750,
+        days_left_in_month: 3,
+      },
+    ],
+  };
+
+  const filledMessage = formatDigestMessage(filledData as any, 'All good.');
+  assert.match(filledMessage, /Auto-logged: S\$15\.00 Netflix \(recurring\)/);
+  assert.match(filledMessage, /Budget: Food 62\.5% used \(3 days left\)/);
+});
+
+test('formatDigestMessage renders the portfolio stub as unavailable', async () => {
+  const { formatDigestMessage } = await import('./formatter');
+
+  const data = {
+    spending: emptySpending(),
+    recurringFired: [],
+    budgetStatuses: [],
+    portfolio: { error: 'not yet implemented' },
+  };
+
+  const message = formatDigestMessage(data as any, 'All good.');
+  assert.match(message, /Portfolio: unavailable \(not yet implemented\)/);
+});
+
+test('formatDigestMessage renders a failed section as unavailable with its reason', async () => {
+  const { formatDigestMessage } = await import('./formatter');
+
+  const data = {
+    spending: { error: 'db locked' },
+    recurringFired: [],
+    budgetStatuses: [],
+    portfolio: { error: 'not yet implemented' },
+  };
+
+  const message = formatDigestMessage(data as any, 'All good.');
+  assert.match(message, /Spending: unavailable \(db locked\)/);
+});
