@@ -39,6 +39,7 @@ export const holdings = sqliteTable('holdings', {
   quantity: real('quantity').notNull(),
   currency: text('currency').notNull(),
   market: text('market').notNull(),
+  broker: text('broker'), // 'ibkr' | 'moomoo' | null (null = manually entered: crypto/cash)
   cost_basis: integer('cost_basis'), // optional, in cents
   created_at: integer('created_at')
     .notNull()

@@ -4,7 +4,7 @@
 
 import { Currency } from './transaction';
 
-export type AssetClass = 'stocks_us' | 'stocks_my' | 'crypto' | 'cash';
+export type AssetClass = 'stocks_us' | 'stocks_my' | 'stocks_sg' | 'crypto' | 'cash';
 
 export interface Holding {
   id: string;
