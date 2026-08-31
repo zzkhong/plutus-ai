@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'crypto';
 import { and, eq, isNull } from 'drizzle-orm';
-import { db } from '../db';
+import { db, getSQLiteDb } from '../db';
 import { holdings } from '../db/schema';
 import { AssetClass, Currency } from '../types';
 import { Broker, Holding, HoldingInput, ParsedHolding } from './types';
@@ -78,6 +78,7 @@ export async function removeHolding(symbol: string): Promise<void> {
  * Full snapshot replace, scoped to one broker: wipes all existing holdings
  * for that broker and inserts the statement's ending positions. Never
  * touches the other broker's rows or manually-entered holdings.
+ * Transactional: both delete and insert succeed or both roll back.
  */
 export async function replaceHoldingsForBroker(broker: Broker, parsed: ParsedHolding[]): Promise<Holding[]> {
   if (parsed.length === 0) {
@@ -87,23 +88,28 @@ export async function replaceHoldingsForBroker(broker: Broker, parsed: ParsedHol
   }
 
   const now = Date.now();
-  await db.delete(holdings).where(eq(holdings.broker, broker));
 
-  const rows = parsed.map((h) => ({
-    id: randomUUID(),
-    symbol: h.symbol,
-    name: h.name,
-    asset_class: h.asset_class,
-    quantity: h.quantity,
-    currency: h.currency,
-    market: h.market,
-    broker,
-    created_at: now,
-    updated_at: now,
-  }));
+  // Use raw better-sqlite3 transaction for atomicity
+  const sqliteDb = getSQLiteDb();
+  return sqliteDb.transaction(() => {
+    db.delete(holdings).where(eq(holdings.broker, broker)).run();
 
-  const inserted = await db.insert(holdings).values(rows).returning();
-  return inserted.map(mapHoldingRow);
+    const rows = parsed.map((h) => ({
+      id: randomUUID(),
+      symbol: h.symbol,
+      name: h.name,
+      asset_class: h.asset_class,
+      quantity: h.quantity,
+      currency: h.currency,
+      market: h.market,
+      broker,
+      created_at: now,
+      updated_at: now,
+    }));
+
+    const inserted = db.insert(holdings).values(rows).returning().all();
+    return inserted.map(mapHoldingRow);
+  })();
 }
 
 export async function listHoldings(): Promise<Holding[]> {
