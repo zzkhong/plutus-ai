@@ -28,7 +28,11 @@ const FETCH_TIMEOUT_MS = 10_000;
  * Exported for direct unit testing (see index.test.ts) — otherwise internal.
  */
 export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-  return Promise.race([promise, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function cacheKey(holding: Holding): string {
