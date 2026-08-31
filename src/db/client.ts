@@ -11,6 +11,7 @@ import { config } from '../config';
 import * as schema from './schema';
 
 let dbInstance: ReturnType<typeof drizzle> | null = null;
+let sqliteDbInstance: Database.Database | null = null;
 
 /**
  * Initialize database connection and run migrations
@@ -26,6 +27,7 @@ function initializeDatabase(): ReturnType<typeof drizzle> {
 
   // Create or connect to database
   const sqliteDb = new Database(dbPath);
+  sqliteDbInstance = sqliteDb;
 
   // Enable foreign keys
   sqliteDb.pragma('foreign_keys = ON');
@@ -52,6 +54,16 @@ export function getDb(): ReturnType<typeof drizzle> {
     dbInstance = initializeDatabase();
   }
   return dbInstance;
+}
+
+/**
+ * Get the underlying better-sqlite3 database instance for transaction support
+ */
+export function getSQLiteDb(): Database.Database {
+  if (!sqliteDbInstance) {
+    getDb(); // Initialize via getDb() which sets sqliteDbInstance
+  }
+  return sqliteDbInstance!;
 }
 
 // Export singleton instance

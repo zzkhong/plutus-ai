@@ -2,6 +2,43 @@
  * /portfolio command handler
  */
 
+import { getPortfolioSummary } from '../../portfolio';
+import { formatCurrency } from '../../config';
+
 export async function handlePortfolioCommand(): Promise<string> {
-  return 'Portfolio check is ready — I just need the portfolio tracker hooked in.\n\nOnce that\'s connected, this will show your current net worth and allocation.';
+  const summary = await getPortfolioSummary();
+
+  if (summary.holdings.length === 0) {
+    return 'No holdings yet. Upload an IBKR/Moomoo statement PDF, or tell me something like "I hold 0.5 BTC" or "cash SGD 5000" to get started.';
+  }
+
+  const unpricedCount = summary.holdings.filter(
+    (h) => h.quote === null && h.asset_class !== 'cash',
+  ).length;
+
+  const lines = [`Net worth: ${formatCurrency(summary.net_worth_sgd, 'SGD')}`];
+  if (unpricedCount > 0) {
+    lines.push(
+      `⚠️ ${unpricedCount} holding${unpricedCount === 1 ? '' : 's'} could not be priced and ${unpricedCount === 1 ? 'is' : 'are'} excluded from the total.`,
+    );
+  }
+  lines.push('', 'By asset class:');
+  for (const entry of summary.by_class) {
+    lines.push(`  ${entry.key}: ${formatCurrency(entry.value_sgd, 'SGD')} (${entry.pct}%)`);
+  }
+
+  lines.push('', 'By currency:');
+  for (const entry of summary.by_currency) {
+    lines.push(`  ${entry.key}: ${formatCurrency(entry.value_sgd, 'SGD')} (${entry.pct}%)`);
+  }
+
+  lines.push('', 'Holdings:');
+  for (const holding of summary.holdings) {
+    const movement = holding.quote
+      ? `${holding.quote.change_pct >= 0 ? '+' : ''}${holding.quote.change_pct.toFixed(2)}%`
+      : 'price unavailable';
+    lines.push(`  ${holding.symbol}: ${holding.quantity} — ${formatCurrency(holding.value_sgd, 'SGD')} (${movement})`);
+  }
+
+  return lines.join('\n');
 }

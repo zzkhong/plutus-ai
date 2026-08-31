@@ -11,7 +11,7 @@
     "start": "node dist/index.js",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write src/**/*.ts",
-    "test": "npx tsx --test src/bot/ai.test.ts src/expense/expense.test.ts src/budget/service.test.ts src/budget/progress.test.ts src/budget/alerts.test.ts src/scheduler/recurring.test.ts src/digest/digest.test.ts src/webhook/webhook.test.ts",
+    "test": "npx tsx --test src/bot/ai.test.ts src/expense/expense.test.ts src/budget/service.test.ts src/budget/progress.test.ts src/budget/alerts.test.ts src/scheduler/recurring.test.ts src/digest/digest.test.ts src/webhook/webhook.test.ts src/portfolio/service.test.ts src/portfolio/price-fetcher/crypto.test.ts src/portfolio/price-fetcher/stocks.test.ts src/portfolio/price-fetcher/index.test.ts src/portfolio/calculator.test.ts src/portfolio/statement-parser.test.ts src/bot/handlers/document.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:studio": "drizzle-kit studio"

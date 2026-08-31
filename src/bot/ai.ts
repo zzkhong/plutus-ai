@@ -7,6 +7,10 @@ import { config } from '../config';
 import { logger } from '../utils/logger';
 import { formatUserFriendlyError } from './formatter/messages';
 import { BotIntent } from './types';
+import { AssetClass, Currency } from '../types';
+
+const VALID_HOLDINGS_ASSET_CLASSES = new Set(['crypto', 'cash']);
+const VALID_CURRENCIES = new Set(['SGD', 'MYR', 'USD', 'BTC', 'ETH', 'BETH']);
 
 export interface ExtractedFields {
   amount?: number;
@@ -15,6 +19,9 @@ export interface ExtractedFields {
   period?: string;
   budgetAmount?: number;
   action?: string;
+  symbol?: string;
+  assetClass?: string;
+  currency?: string;
 }
 
 export interface IntentAnalysis {
@@ -72,7 +79,7 @@ export async function classifyUserMessage(rawText: string): Promise<IntentAnalys
     const model = genAI.getGenerativeModel({
       model: 'gemini-3.6-flash',
       systemInstruction:
-        'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action }, rawText. Allowed intents: expense, query, budget, correction, recurring, help, unknown. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
+        'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action, symbol, assetClass, currency }, rawText. Allowed intents: expense, query, budget, correction, recurring, holdings, help, unknown. The holdings intent covers non-brokerage portfolio updates like "I hold 0.5 BTC" or "cash SGD 5000" — extract symbol (e.g. BTC, SGD), assetClass (crypto or cash), currency, and amount as the quantity. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
     });
 
     const prompt = `User message: "${trimmed}"\n\nReturn only valid JSON with keys intent, confidence, extracted, rawText.`;
@@ -178,6 +185,44 @@ export async function buildAssistantReply(result: IntentAnalysis): Promise<strin
     }
     case 'recurring': {
       return `That sounds like a recurring item. I'll keep it in the recurring flow and make sure it gets handled as a repeat expense.`;
+    }
+    case 'holdings': {
+      const { addHolding, removeHolding } = await import('../portfolio/service');
+
+      if (!extracted.symbol) {
+        return `Which holding? Try "I hold 0.5 BTC" or "cash SGD 5000".`;
+      }
+
+      const symbol = extracted.symbol.toUpperCase();
+      const isRemoval = /remove|delete/i.test(extracted.action ?? rawText);
+
+      if (isRemoval) {
+        await removeHolding(symbol);
+        return `Done — removed ${symbol} from your holdings.`;
+      }
+
+      const quantity = extracted.amount ?? 0;
+      if (quantity <= 0) {
+        return `How much ${symbol} do you hold?`;
+      }
+
+      const assetClass: AssetClass = VALID_HOLDINGS_ASSET_CLASSES.has(extracted.assetClass ?? '')
+        ? (extracted.assetClass as AssetClass)
+        : 'crypto';
+      const currency: Currency = VALID_CURRENCIES.has(extracted.currency ?? '')
+        ? (extracted.currency as Currency)
+        : 'USD';
+
+      const holding = await addHolding({
+        symbol,
+        name: symbol,
+        quantity,
+        asset_class: assetClass,
+        currency,
+        market: assetClass === 'cash' ? 'Cash' : 'Crypto',
+      });
+
+      return `Got it — recorded ${holding.quantity} ${holding.symbol}.`;
     }
     case 'query': {
       return `I can help with that: "${rawText}". I'll pull the relevant numbers and summarize the result for you once the data layer is live.`;
