@@ -8,6 +8,7 @@ export type BotIntent =
   | 'budget'
   | 'correction'
   | 'recurring'
+  | 'holdings'
   | 'help'
   | 'unknown';
 

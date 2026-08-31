@@ -124,3 +124,53 @@ test('buildAssistantReply asks for a category when the budget intent has none', 
 
   assert.match(reply, /which category/i);
 });
+
+test('buildAssistantReply records a new crypto holding for the holdings intent', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply({
+    intent: 'holdings',
+    confidence: 0.9,
+    extracted: { symbol: 'BTC', amount: 0.5, assetClass: 'crypto', currency: 'USD' },
+    rawText: 'I hold 0.5 BTC',
+  });
+
+  assert.match(reply, /BTC/);
+
+  const { listHoldings } = await import('../portfolio/service');
+  const allHoldings = await listHoldings();
+  const btc = allHoldings.find((h) => h.symbol === 'BTC');
+
+  assert.ok(btc);
+  assert.equal(btc!.quantity, 0.5);
+  assert.equal(btc!.broker, null);
+});
+
+test('buildAssistantReply removes a holding when the action indicates removal', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { addHolding, listHoldings } = await import('../portfolio/service');
+  await addHolding({ symbol: 'ETH', name: 'ETH', quantity: 1, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
+
+  const reply = await buildAssistantReply({
+    intent: 'holdings',
+    confidence: 0.9,
+    extracted: { symbol: 'ETH', action: 'remove' },
+    rawText: 'Remove my ETH holding',
+  });
+
+  assert.match(reply, /removed/i);
+
+  const allHoldings = await listHoldings();
+  assert.ok(!allHoldings.some((h) => h.symbol === 'ETH'));
+});
+
+test('buildAssistantReply asks which holding when the holdings intent has no symbol', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply({
+    intent: 'holdings',
+    confidence: 0.5,
+    extracted: {},
+    rawText: 'I have some crypto',
+  });
+
+  assert.match(reply, /which holding/i);
+});
