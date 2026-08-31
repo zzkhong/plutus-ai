@@ -18,6 +18,7 @@ import { handleDigestCommand } from './commands/digest';
 import { handleHelpCommand } from './commands/help';
 import { handleTextMessage } from './handlers/text';
 import { handleVoiceMessage } from './handlers/voice';
+import { handleDocumentMessage } from './handlers/document';
 
 export class PlutoBot {
   private bot: Bot;
@@ -97,6 +98,19 @@ export class PlutoBot {
       }
       const response = await handleVoiceMessage(String(voice.file_id));
       await this.replyWithText(ctx, response);
+    });
+
+    this.bot.on('message:document', async (ctx) => {
+      const document = ctx.message.document;
+      if (!document) {
+        return;
+      }
+      const file = await ctx.api.getFile(document.file_id);
+      const fileUrl = `https://api.telegram.org/file/bot${config.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+      const response = await fetch(fileUrl);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const reply = await handleDocumentMessage(buffer, document.mime_type ?? '');
+      await this.replyWithText(ctx, reply);
     });
 
     this.bot.command('start', async (ctx) => {
