@@ -20,23 +20,33 @@ SGD, allocation percentages, and daily movements.
 
 ## Acceptance Criteria
 
-**Status: not started.** No `src/portfolio/` directory exists; `/portfolio`
-(src/bot/commands/portfolio.ts) is a hardcoded placeholder string. None of
-the criteria below are implemented.
+**Status: implemented**, with two known gaps — see below. See
+`src/portfolio/`, the wired `/portfolio` command, the statement PDF
+upload flow, and the `holdings` chat intent.
 
-- [ ] User can add/remove holdings via chat ("Add 10 AAPL", "Remove
+- [x] User can add/remove holdings via chat ("Add 10 AAPL", "Remove
       CIMB")
-- [ ] US stock prices fetched from a free API (Yahoo Finance, Alpha
+- [x] US stock prices fetched from a free API (Yahoo Finance, Alpha
       Vantage, or similar)
-- [ ] Malaysian stock prices fetched (Bursa Malaysia data source)
-- [ ] Crypto prices fetched for BTC, ETH, BETH (CoinGecko free tier)
-- [ ] Total net worth calculated in SGD with currency conversion
-- [ ] Allocation breakdown by asset class (US stocks, MY stocks,
+- [ ] Malaysian stock prices fetched (Bursa Malaysia data source) —
+      implemented via Yahoo Finance `.KL` symbols, but only for symbols
+      present in the manually-maintained
+      `src/portfolio/price-fetcher/symbol-map.ts` table; unmapped
+      symbols show "price unavailable".
+- [x] Crypto prices fetched for BTC, ETH, BETH (CoinGecko free tier)
+- [x] Total net worth calculated in SGD with currency conversion
+- [x] Allocation breakdown by asset class (US stocks, MY stocks,
       crypto, cash)
-- [ ] Currency exposure breakdown (SGD, MYR, USD, crypto)
-- [ ] Daily movement calculation (% change from previous close)
-- [ ] Cash balances trackable across currencies
-- [ ] /portfolio command returns formatted summary
+- [x] Currency exposure breakdown (SGD, MYR, USD, crypto)
+- [x] Daily movement calculation (% change from previous close)
+- [x] Cash balances trackable across currencies
+- [x] /portfolio command returns formatted summary
+
+**Known gap:** the Gemini statement-extraction prompt (IBKR/Moomoo PDF
+upload flow) is unvalidated against real broker PDFs — no sample
+statements were available during implementation. This is an explicit,
+known gap documented in the design spec's "Sample statements not yet
+provided" scope decision, not an oversight.
 
 ---
 
