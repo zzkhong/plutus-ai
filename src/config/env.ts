@@ -19,6 +19,7 @@ const envSchema = z.object({
     .min(1, 'GOOGLE_API_KEY is required — Pluto AI classifies every message with Gemini and has no rule-based fallback'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   PORT: z.string().default('3000'),
+  WEBHOOK_API_KEY: z.string().optional(),
 });
 
 // Type for the validated config

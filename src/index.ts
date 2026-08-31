@@ -9,6 +9,7 @@ import { db } from './db';
 import { PlutoBot } from './bot';
 import { startRecurringScheduler, triggerRecurringNow } from './scheduler/recurring';
 import { startDigestScheduler } from './digest';
+import { startWebhookServer } from './webhook';
 
 /**
  * Initialize application
@@ -55,6 +56,10 @@ async function initialize(): Promise<void> {
     // Start daily digest scheduler (10 PM Asia/Singapore) — no catch-up on
     // startup by design; a missed 10pm run is skipped, not backfilled.
     startDigestScheduler(plutoBot ? plutoBot.getBot() : null);
+
+    // Start the iOS Shortcut webhook server (POST /api/apple-pay). Runs on its
+    // own port, independent of the Telegram bot's long-polling loop.
+    startWebhookServer(plutoBot ? plutoBot.getBot() : null);
 
     // Check and fire any recurring transactions that may have been missed during downtime
     logger.info('Checking for recurring transactions due today...');
