@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { enrichHolding, calculateNetWorth, calculateAllocation, buildPortfolioSummary } from './calculator';
 import { Holding, PriceQuote } from './types';
+import { Currency } from '../types';
 
 function fakeHolding(overrides: Partial<Holding> = {}): Holding {
   return {
@@ -48,6 +49,15 @@ test('enrichHolding values cash directly from quantity, ignoring quote', () => {
   const enriched = enrichHolding(holding, null);
 
   assert.equal(enriched.value_sgd, 500000); // S$5000 -> 500000 cents
+});
+
+test('enrichHolding guards against an unrecognized currency slipping through, returning 0 instead of NaN', () => {
+  const holding = fakeHolding({ currency: 'XXX' as Currency });
+  const quote = fakeQuote({ currency: 'XXX' as Currency });
+
+  const enriched = enrichHolding(holding, quote);
+
+  assert.equal(enriched.value_sgd, 0);
 });
 
 test('calculateNetWorth sums value_sgd across mixed holdings', () => {

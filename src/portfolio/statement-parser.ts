@@ -16,6 +16,9 @@ import { Broker, ParsedHolding, ParsedStatement } from './types';
 
 export class StatementParseError extends Error {}
 
+const VALID_ASSET_CLASSES = new Set(['stocks_us', 'stocks_my', 'stocks_sg']);
+const VALID_STATEMENT_CURRENCIES = new Set(['USD', 'MYR', 'SGD']);
+
 const SYSTEM_INSTRUCTION = `You are a financial statement parser for Pluto AI. You will receive a PDF of a brokerage statement from either Interactive Brokers (IBKR) or Moomoo. Identify which broker issued it from its layout/branding, then extract every open stock/ETF position from its "Open Positions" (IBKR) or "Positions" (Moomoo) section. Return strict JSON only, matching exactly this shape:
 {"broker": "ibkr" | "moomoo", "holdings": [{"symbol": string, "name": string, "quantity": number, "asset_class": "stocks_us" | "stocks_my" | "stocks_sg", "currency": "USD" | "MYR" | "SGD", "market": string}]}
 Do not include cash balances, options, or futures. If you cannot confidently identify the broker or find no open positions, return {"broker": null, "holdings": []}.`;
@@ -38,12 +41,35 @@ export function parseGeminiStatementResponse(rawText: string): ParsedStatement {
     throw new StatementParseError('Could not identify the statement broker');
   }
 
-  const holdings = (parsed.holdings ?? []) as ParsedHolding[];
-  if (holdings.length === 0) {
+  const rawHoldings = (parsed.holdings ?? []) as unknown[];
+  if (rawHoldings.length === 0) {
     throw new StatementParseError(
       'No holdings found in the statement — treated as a parse failure, not an emptied account',
     );
   }
+
+  const holdings = rawHoldings.map((raw, index) => {
+    const holding = raw as Record<string, unknown>;
+    if (typeof holding.symbol !== 'string' || holding.symbol.trim() === '') {
+      throw new StatementParseError(`Holding ${index} is missing a valid symbol`);
+    }
+    if (typeof holding.name !== 'string' || holding.name.trim() === '') {
+      throw new StatementParseError(`Holding ${index} (${holding.symbol}) is missing a valid name`);
+    }
+    if (typeof holding.quantity !== 'number' || !Number.isFinite(holding.quantity) || holding.quantity <= 0) {
+      throw new StatementParseError(`Holding ${index} (${holding.symbol}) has an invalid quantity`);
+    }
+    if (typeof holding.asset_class !== 'string' || !VALID_ASSET_CLASSES.has(holding.asset_class)) {
+      throw new StatementParseError(`Holding ${index} (${holding.symbol}) has an unrecognized asset class`);
+    }
+    if (typeof holding.currency !== 'string' || !VALID_STATEMENT_CURRENCIES.has(holding.currency)) {
+      throw new StatementParseError(`Holding ${index} (${holding.symbol}) has an unrecognized currency`);
+    }
+    if (typeof holding.market !== 'string' || holding.market.trim() === '') {
+      throw new StatementParseError(`Holding ${index} (${holding.symbol}) is missing a market`);
+    }
+    return holding as unknown as ParsedHolding;
+  });
 
   return { broker: parsed.broker as Broker, holdings };
 }

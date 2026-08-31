@@ -163,6 +163,44 @@ test('buildAssistantReply removes a holding when the action indicates removal', 
   assert.ok(!allHoldings.some((h) => h.symbol === 'ETH'));
 });
 
+test('buildAssistantReply falls back to crypto when the holdings intent has an unrecognized asset class', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply({
+    intent: 'holdings',
+    confidence: 0.9,
+    extracted: { symbol: 'AAPL', amount: 10, assetClass: 'stocks_us', currency: 'USD' },
+    rawText: 'I hold 10 AAPL',
+  });
+
+  assert.match(reply, /AAPL/);
+
+  const { listHoldings } = await import('../portfolio/service');
+  const allHoldings = await listHoldings();
+  const aapl = allHoldings.find((h) => h.symbol === 'AAPL');
+
+  assert.ok(aapl);
+  assert.equal(aapl!.asset_class, 'crypto');
+});
+
+test('buildAssistantReply falls back to USD when the holdings intent has an unrecognized currency', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply({
+    intent: 'holdings',
+    confidence: 0.9,
+    extracted: { symbol: 'DOGE', amount: 100, assetClass: 'crypto', currency: 'HKD' },
+    rawText: 'I hold 100 DOGE',
+  });
+
+  assert.match(reply, /DOGE/);
+
+  const { listHoldings } = await import('../portfolio/service');
+  const allHoldings = await listHoldings();
+  const doge = allHoldings.find((h) => h.symbol === 'DOGE');
+
+  assert.ok(doge);
+  assert.equal(doge!.currency, 'USD');
+});
+
 test('buildAssistantReply asks which holding when the holdings intent has no symbol', async () => {
   const { buildAssistantReply } = await import('./ai');
   const reply = await buildAssistantReply({

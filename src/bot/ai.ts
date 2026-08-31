@@ -9,6 +9,9 @@ import { formatUserFriendlyError } from './formatter/messages';
 import { BotIntent } from './types';
 import { AssetClass, Currency } from '../types';
 
+const VALID_HOLDINGS_ASSET_CLASSES = new Set(['crypto', 'cash']);
+const VALID_CURRENCIES = new Set(['SGD', 'MYR', 'USD', 'BTC', 'ETH', 'BETH']);
+
 export interface ExtractedFields {
   amount?: number;
   merchant?: string;
@@ -203,8 +206,12 @@ export async function buildAssistantReply(result: IntentAnalysis): Promise<strin
         return `How much ${symbol} do you hold?`;
       }
 
-      const assetClass = (extracted.assetClass as AssetClass) ?? 'crypto';
-      const currency = (extracted.currency as Currency) ?? 'USD';
+      const assetClass: AssetClass = VALID_HOLDINGS_ASSET_CLASSES.has(extracted.assetClass ?? '')
+        ? (extracted.assetClass as AssetClass)
+        : 'crypto';
+      const currency: Currency = VALID_CURRENCIES.has(extracted.currency ?? '')
+        ? (extracted.currency as Currency)
+        : 'USD';
 
       const holding = await addHolding({
         symbol,

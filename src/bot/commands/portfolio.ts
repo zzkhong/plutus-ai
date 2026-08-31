@@ -12,7 +12,17 @@ export async function handlePortfolioCommand(): Promise<string> {
     return 'No holdings yet. Upload an IBKR/Moomoo statement PDF, or tell me something like "I hold 0.5 BTC" or "cash SGD 5000" to get started.';
   }
 
-  const lines = [`Net worth: ${formatCurrency(summary.net_worth_sgd, 'SGD')}`, '', 'By asset class:'];
+  const unpricedCount = summary.holdings.filter(
+    (h) => h.quote === null && h.asset_class !== 'cash',
+  ).length;
+
+  const lines = [`Net worth: ${formatCurrency(summary.net_worth_sgd, 'SGD')}`];
+  if (unpricedCount > 0) {
+    lines.push(
+      `⚠️ ${unpricedCount} holding${unpricedCount === 1 ? '' : 's'} could not be priced and ${unpricedCount === 1 ? 'is' : 'are'} excluded from the total.`,
+    );
+  }
+  lines.push('', 'By asset class:');
   for (const entry of summary.by_class) {
     lines.push(`  ${entry.key}: ${formatCurrency(entry.value_sgd, 'SGD')} (${entry.pct}%)`);
   }

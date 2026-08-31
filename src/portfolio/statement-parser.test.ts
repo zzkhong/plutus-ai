@@ -43,6 +43,27 @@ test('parseGeminiStatementResponse throws StatementParseError when holdings is e
   );
 });
 
+test('parseGeminiStatementResponse throws StatementParseError when a holding has a non-numeric or non-positive quantity', () => {
+  const zeroQty = `{"broker": "ibkr", "holdings": [{"symbol": "AAPL", "name": "Apple Inc.", "quantity": 0, "asset_class": "stocks_us", "currency": "USD", "market": "NASDAQ"}]}`;
+  assert.throws(() => parseGeminiStatementResponse(zeroQty), StatementParseError);
+
+  const negativeQty = `{"broker": "ibkr", "holdings": [{"symbol": "AAPL", "name": "Apple Inc.", "quantity": -5, "asset_class": "stocks_us", "currency": "USD", "market": "NASDAQ"}]}`;
+  assert.throws(() => parseGeminiStatementResponse(negativeQty), StatementParseError);
+
+  const nonNumericQty = `{"broker": "ibkr", "holdings": [{"symbol": "AAPL", "name": "Apple Inc.", "quantity": "ten", "asset_class": "stocks_us", "currency": "USD", "market": "NASDAQ"}]}`;
+  assert.throws(() => parseGeminiStatementResponse(nonNumericQty), StatementParseError);
+});
+
+test('parseGeminiStatementResponse throws StatementParseError when a holding has an unrecognized asset class', () => {
+  const raw = `{"broker": "ibkr", "holdings": [{"symbol": "BTC", "name": "Bitcoin", "quantity": 1, "asset_class": "crypto", "currency": "USD", "market": "NASDAQ"}]}`;
+  assert.throws(() => parseGeminiStatementResponse(raw), StatementParseError);
+});
+
+test('parseGeminiStatementResponse throws StatementParseError when a holding has an unrecognized currency', () => {
+  const raw = `{"broker": "ibkr", "holdings": [{"symbol": "0700", "name": "Tencent", "quantity": 100, "asset_class": "stocks_us", "currency": "HKD", "market": "HKEX"}]}`;
+  assert.throws(() => parseGeminiStatementResponse(raw), StatementParseError);
+});
+
 test('parseStatement surfaces a Gemini/network failure as StatementParseError, not a thrown network error', async () => {
   const originalFetch = global.fetch;
   global.fetch = (() => {

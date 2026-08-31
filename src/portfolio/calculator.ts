@@ -8,13 +8,15 @@ import { AllocationEntry, EnrichedHolding, Holding, PortfolioSummary, PriceQuote
 
 function computeValueSgd(holding: Holding, quote: PriceQuote | null): number {
   if (holding.asset_class === 'cash') {
-    return toSGD(Math.round(holding.quantity * 100), holding.currency);
+    const value = toSGD(Math.round(holding.quantity * 100), holding.currency);
+    return Number.isFinite(value) ? value : 0;
   }
   if (!quote) {
     return 0;
   }
   const valueInQuoteCurrency = holding.quantity * quote.price;
-  return toSGD(Math.round(valueInQuoteCurrency * 100), quote.currency);
+  const value = toSGD(Math.round(valueInQuoteCurrency * 100), quote.currency);
+  return Number.isFinite(value) ? value : 0;
 }
 
 export function enrichHolding(holding: Holding, quote: PriceQuote | null): EnrichedHolding {
