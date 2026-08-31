@@ -33,7 +33,9 @@ export async function getStockPrice(
       return null;
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as {
+      chart?: { result?: Array<{ meta?: { regularMarketPrice?: number; chartPreviousClose?: number } }> };
+    };
     const meta = data?.chart?.result?.[0]?.meta;
     if (!meta || typeof meta.regularMarketPrice !== 'number' || typeof meta.chartPreviousClose !== 'number') {
       return null;

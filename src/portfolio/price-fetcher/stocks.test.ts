@@ -61,7 +61,7 @@ test('getStockPrice returns null for an unmapped MY/SG symbol without calling fe
   global.fetch = (async () => {
     fetchCalled = true;
     return { ok: true, json: async () => ({}) };
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 
   try {
     const { getStockPrice } = await import('./stocks');
@@ -76,7 +76,7 @@ test('getStockPrice returns null for an unmapped MY/SG symbol without calling fe
 
 test('getStockPrice returns null when the response has no usable meta', async () => {
   const originalFetch = global.fetch;
-  global.fetch = (async () => ({ ok: true, json: async () => ({ chart: { result: [] } }) })) as typeof fetch;
+  global.fetch = (async () => ({ ok: true, json: async () => ({ chart: { result: [] } }) })) as unknown as typeof fetch;
 
   try {
     const { getStockPrice } = await import('./stocks');

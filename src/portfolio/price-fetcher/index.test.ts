@@ -28,7 +28,7 @@ test('getPrice returns null for cash without calling fetch', async () => {
   global.fetch = (async () => {
     fetchCalled = true;
     return { ok: true, json: async () => ({}) };
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 
   try {
     const { getPrice } = await import('./index');
@@ -68,7 +68,7 @@ test('getPrice caches a quote so a second call within the TTL does not refetch',
       ok: true,
       json: async () => ({ chart: { result: [{ meta: { regularMarketPrice: 190, chartPreviousClose: 180 } }] } }),
     };
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 
   try {
     const { getPrice } = await import('./index');

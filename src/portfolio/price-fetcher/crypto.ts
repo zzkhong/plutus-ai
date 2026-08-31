@@ -21,7 +21,7 @@ export async function getCryptoPrice(symbol: 'BTC' | 'ETH' | 'BETH'): Promise<Pr
       return null;
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as Record<string, { usd?: number; usd_24h_change?: number }>;
     const entry = data[id];
     if (!entry || typeof entry.usd !== 'number') {
       return null;

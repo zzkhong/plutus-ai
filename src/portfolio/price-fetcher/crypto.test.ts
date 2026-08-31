@@ -47,7 +47,7 @@ test('getCryptoPrice uses the binance-staked-eth id for BETH', async () => {
 
 test('getCryptoPrice returns null when the response is not ok', async () => {
   const originalFetch = global.fetch;
-  global.fetch = (async () => ({ ok: false, json: async () => ({}) })) as typeof fetch;
+  global.fetch = (async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof fetch;
 
   try {
     const { getCryptoPrice } = await import('./crypto');
