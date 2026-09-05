@@ -1,7 +1,8 @@
-import test, { before } from 'node:test';
+import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { stubGeminiCategorization } from '../testing/geminiStub';
 
 process.env.DATABASE_URL = './data/test-webhook.db';
 process.env.WEBHOOK_API_KEY = 'test-webhook-secret';
@@ -12,9 +13,16 @@ if (fs.existsSync(testDbPath)) {
   fs.rmSync(testDbPath, { force: true });
 }
 
+let restoreGeminiStub: () => void;
+
 before(async () => {
+  restoreGeminiStub = stubGeminiCategorization();
   const { runMigrations } = await import('../db/migrate');
   runMigrations();
+});
+
+after(() => {
+  restoreGeminiStub();
 });
 
 function fakeBot() {
