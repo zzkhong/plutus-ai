@@ -106,9 +106,8 @@ export async function handleSplitTextMessage(chatId: number, message: string): P
     }
     const receipt = state.receipt;
 
-    clearSplit(chatId);
-
     if (declined) {
+      clearSplit(chatId);
       return 'Okay, nothing logged.';
     }
 
@@ -120,6 +119,8 @@ export async function handleSplitTextMessage(chatId: number, message: string): P
       note: 'Split bill',
       source: 'split',
     });
+
+    clearSplit(chatId);
 
     return `Logged ${formatCurrency(transaction.amount_sgd, 'SGD')} for ${transaction.merchant} (${transaction.category}).`;
   }
