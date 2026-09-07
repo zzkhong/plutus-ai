@@ -46,7 +46,8 @@ in this task.
       provider/key without losing approval or needing re-approval
 - [ ] Unregistered / pending-approval chats can't reach any command or
       free-text flow except `/setup` and `/help`
-- [ ] `classifyUserMessage`, `inferCategory`, and the digest's
+- [ ] `classifyUserMessage`, `inferCategory`, `parseStatement`
+      (`src/portfolio/statement-parser.ts`), and the digest's
       `generateSummaryLine` all resolve their LLM call through the
       calling user's own stored provider/key, not a global
       `GOOGLE_API_KEY`
@@ -156,7 +157,8 @@ export function getProviderForUser(user: User): LLMProvider;
 ```
 
 `classifyUserMessage`, `inferCategory`, `correctLastTransaction`'s
-re-categorization step, the digest's `generateSummaryLine`, and the
+re-categorization step, `parseStatement`, the digest's
+`generateSummaryLine`, and the
 `/setup` key-validation call all take a `userId` (or a resolved
 `LLMProvider`) instead of constructing `GoogleGenerativeAI` directly
 against `config.GOOGLE_API_KEY`. The existing `safeJsonParse`/JSON
@@ -170,11 +172,17 @@ of which provider is behind it.
 
 ## Cross-Cutting Changes
 
-- **Service layers** (`expense/service.ts`, `budget/service.ts`):
-  every exported function gains a leading `userId` parameter and every
-  query is scoped `WHERE user_id = ?`. "Most recent transaction" in
-  `undoLastTransaction`/`correctLastTransaction` becomes most-recent
-  *for that user*.
+- **Service layers** (`expense/service.ts`, `budget/service.ts`,
+  `portfolio/service.ts`): every exported function gains a leading
+  `userId` parameter and every query is scoped `WHERE user_id = ?`.
+  "Most recent transaction" in `undoLastTransaction`/
+  `correctLastTransaction` becomes most-recent *for that user*;
+  `replaceHoldingsForBroker` only ever wipes/inserts that user's rows
+  for the given broker. Note: the portfolio module (`src/portfolio/`)
+  is already fully implemented (statement import, price fetching, net
+  worth/allocation) — PLUTO-04 shipped single-user; this task only
+  adds the `user_id` scoping and per-user LLM provider to it, not new
+  functionality.
 - **Crons**: the recurring-transaction fire job and the 10pm digest
   job iterate all `status='approved'` users and run their existing
   per-user logic against each, sending via
@@ -216,6 +224,9 @@ src/
 ├── expense/
 │   ├── service.ts             # migrated onto Drizzle, user_id-scoped
 │   └── categorizer.ts         # inferCategory takes userId
+├── portfolio/
+│   ├── service.ts             # user_id-scoped (already Drizzle-based)
+│   └── statement-parser.ts    # parseStatement takes userId
 ├── digest/                    # generateSummaryLine takes userId; scheduler loops users
 ├── scheduler/recurring.ts     # loops approved users
 ├── webhook/

@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Plutus AI is a personal finance assistant: a Telegram bot (Grammy) backed by SQLite (better-sqlite3 + Drizzle ORM) that logs expenses, manages budgets, sends an AI-powered daily digest, and accepts auto-logged Apple Pay transactions via an iOS Shortcuts webhook. Message understanding is Gemini-first with no rule-based fallback — `GOOGLE_API_KEY` is a required env var. The module build-out plan is in [docs/tasks/](docs/tasks/) (01 foundation → 07 iOS Shortcuts integration). The product spec (`doc/pluto-ai-prd.md`) was deleted in commit `f6531e4` ("chore: move md files") while the rest of `doc/` was renamed to `docs/`, and was never re-added — there is currently no PRD file in the repo; don't link to it.
+Plutus AI is a personal finance assistant: a Telegram bot (Grammy) backed by SQLite (better-sqlite3 + Drizzle ORM) that logs expenses, manages budgets, tracks a brokerage/crypto/cash portfolio, sends an AI-powered daily digest, and accepts auto-logged Apple Pay transactions via an iOS Shortcuts webhook. Message understanding is Gemini-first with no rule-based fallback — `GOOGLE_API_KEY` is a required env var. The module build-out plan is in [docs/tasks/](docs/tasks/) (01 foundation → 07 iOS Shortcuts integration, implemented; 08–10 are specced but not yet implemented — expense splitting, multi-user/BYOK, and a market-advice digest layer). The product spec (`doc/pluto-ai-prd.md`) was deleted in commit `f6531e4` ("chore: move md files") while the rest of `doc/` was renamed to `docs/`, and was never re-added — there is currently no PRD file in the repo; don't link to it.
 
-Current build state: foundation, the Telegram bot shell, the expense engine, the budget system, the daily digest, and the iOS Shortcuts webhook (tasks 01–03, 05–07) are implemented and tested. **Two things are still stubs**: the portfolio tracker (task 04 — `/portfolio` returns a hardcoded placeholder string) and wiring the free-text "expense" intent to `logExpense` (Gemini classifies it correctly, but `buildAssistantReply` only acknowledges it — see below). Everything else described as "not yet wired" or "stub" in older notes has since been built; verify against the code before trusting a stale claim here.
+Current build state: foundation, the Telegram bot shell, the expense engine, the budget system, the portfolio tracker, the daily digest, and the iOS Shortcuts webhook (tasks 01–07) are implemented and tested. **One thing is still a stub**: wiring the free-text "expense" intent to `logExpense` (Gemini classifies it correctly, but `buildAssistantReply` only acknowledges it — see below). Everything else described as "not yet wired" or "stub" in older notes has since been built; verify against the code before trusting a stale claim here — this file has been wrong about the portfolio tracker's status before.
 
 ## Commands
 
@@ -19,7 +19,7 @@ npm run format    # prettier --write src/**/*.ts
 npm test          # node's built-in test runner over the *.test.ts files wired into package.json
 ```
 
-There is no test-file globbing — `npm test` runs a fixed list of `*.test.ts` files (currently `src/bot/ai.test.ts`, `src/expense/expense.test.ts`, `src/budget/service.test.ts`, `src/budget/progress.test.ts`, `src/budget/alerts.test.ts`, `src/scheduler/recurring.test.ts`, `src/digest/digest.test.ts`, `src/webhook/webhook.test.ts`) via `npx tsx --test`. To run a single test file or filter by name:
+There is no test-file globbing — `npm test` runs a fixed list of `*.test.ts` files (currently `src/bot/ai.test.ts`, `src/expense/expense.test.ts`, `src/budget/service.test.ts`, `src/budget/progress.test.ts`, `src/budget/alerts.test.ts`, `src/scheduler/recurring.test.ts`, `src/digest/digest.test.ts`, `src/webhook/webhook.test.ts`, `src/portfolio/service.test.ts`, `src/portfolio/price-fetcher/crypto.test.ts`, `src/portfolio/price-fetcher/stocks.test.ts`, `src/portfolio/price-fetcher/index.test.ts`, `src/portfolio/calculator.test.ts`, `src/portfolio/statement-parser.test.ts`, `src/bot/handlers/document.test.ts`) via `npx tsx --test`. To run a single test file or filter by name:
 
 ```bash
 npx tsx --test src/expense/expense.test.ts
@@ -51,7 +51,7 @@ Free text is classified by [src/bot/ai.ts](src/bot/ai.ts) (`classifyUserMessage`
 
 **The `expense` intent is the one classification branch still not wired to the expense engine** — Gemini correctly extracts amount/merchant/category, but `buildAssistantReply`'s `expense` case only returns an acknowledgement string; it never calls `logExpense`. Transactions actually get persisted through three paths only: the `/today`/`/month`/`/export`/`/undo` slash commands reading/writing via [src/expense/service.ts](src/expense/service.ts), the recurring-transaction cron firing due entries, and the iOS Shortcuts webhook (`POST /api/apple-pay`, see [src/webhook/routes/apple-pay.ts](src/webhook/routes/apple-pay.ts) and [docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md)).
 
-`/portfolio` is the only remaining hardcoded placeholder string — the portfolio tracker (task 04) hasn't been implemented. `/budget` is real: it calls `getBudgetStatus` ([src/budget/progress.ts](src/budget/progress.ts)).
+`/portfolio` and `/budget` are both real: `/portfolio` calls `getPortfolioSummary` ([src/portfolio/index.ts](src/portfolio/index.ts), see below), `/budget` calls `getBudgetStatus` ([src/budget/progress.ts](src/budget/progress.ts)).
 
 ### Expense engine internals
 
@@ -61,10 +61,14 @@ Because `inferCategory` hits Gemini on every call, any test that reaches `logExp
 
 `correctLastTransaction(field, value)` only ever mutates the single most-recent transaction — there's no way to target an arbitrary past transaction.
 
+### Portfolio tracker
+
+[src/portfolio/](src/portfolio/) is fully implemented: `service.ts` (Drizzle CRUD against the `holdings` table — `addHolding`/`removeHolding` only ever touch manually-entered rows where `broker IS NULL`, `replaceHoldingsForBroker` wholesale-replaces one broker's rows in a transaction), `statement-parser.ts` (`parseStatement` sends a PDF to Gemini multimodal, detects IBKR vs Moomoo, and extracts positions as strict JSON — throws `StatementParseError` on any failure, no rule-based fallback, same degrade-don't-guess convention as `classifyUserMessage`), `price-fetcher/` (Yahoo Finance chart API for US/MY/SG stocks — MY/SG symbols resolved via a hand-maintained `symbol-map.ts` table, unmapped symbols degrade to "unavailable" — and CoinGecko for crypto, both with an in-memory TTL cache, no DB-backed price cache), and `calculator.ts` (pure net worth/allocation math). `src/bot/handlers/document.ts` handles PDF uploads (`message:document` in [src/bot/index.ts](src/bot/index.ts)) end-to-end: parse → `replaceHoldingsForBroker` → reply with the new net worth, no confirmation step. Crypto/cash holdings are entered via chat, not statement upload. See [docs/superpowers/specs/2026-08-31-portfolio-tracker-design.md](docs/superpowers/specs/2026-08-31-portfolio-tracker-design.md) for the full design and its one known gap (the extraction prompt is unvalidated against real IBKR/Moomoo PDFs).
+
 ### Budget, digest, and webhook modules
 
 - [src/budget/](src/budget/) — `setBudget`/`removeBudget`/`listBudgets`/`findBudgetByCategory` ([service.ts](src/budget/service.ts)), `getBudgetStatus` ([progress.ts](src/budget/progress.ts), spend-vs-limit per category with days-left-in-month), and `checkAlerts` ([alerts.ts](src/budget/alerts.ts)) — called from the recurring-transaction cron to push a Telegram message the first time a category crosses a threshold.
-- [src/digest/](src/digest/) — `buildDigestMessage` composes an AI-written nightly summary from `collectDigestData` (aggregator), `generateSummaryLine` (Gemini), and `formatDigestMessage`; `startDigestScheduler` runs it at 10pm Asia/Singapore via node-cron, `/digest` triggers it on demand.
+- [src/digest/](src/digest/) — `buildDigestMessage` composes an AI-written nightly summary from `collectDigestData` (aggregator), `generateSummaryLine` (Gemini), and `formatDigestMessage`; `startDigestScheduler` runs it at 10pm Asia/Singapore via node-cron, `/digest` triggers it on demand. The digest's `portfolio` section is still a stub (`{ error: 'not yet implemented' }` in `collectDigestData`) — task 10 fills it in with LLM-generated market-advice on top of the already-implemented portfolio tracker.
 - [src/webhook/](src/webhook/) — a standalone Hono app (`createWebhookApp`) exposing `GET /api/health` and `POST /api/apple-pay` (guarded by `apiKeyAuthMiddleware` checking `WEBHOOK_API_KEY` against the `x-api-key` header). Meant to be exposed via a Cloudflare quick tunnel for the iOS Shortcuts automation described in [docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md); the webhook server does not start if `WEBHOOK_API_KEY` is unset.
 
 ### Config and types
