@@ -48,8 +48,8 @@ export function parseGeminiAssignmentResponse(rawText: string, validItemNames: s
   }
 
   if (parsed.mode === 'itemized') {
-    const rawAssignments = (parsed.itemAssignments ?? []) as unknown[];
-    if (rawAssignments.length === 0) {
+    const rawAssignments = parsed.itemAssignments;
+    if (!Array.isArray(rawAssignments) || rawAssignments.length === 0) {
       throw new AssignmentParseError('Itemized split has no item assignments');
     }
 
@@ -57,9 +57,15 @@ export function parseGeminiAssignmentResponse(rawText: string, validItemNames: s
     const assignedNames = new Set<string>();
 
     const itemAssignments: ItemAssignment[] = rawAssignments.map((raw, index) => {
+      if (typeof raw !== 'object' || raw === null) {
+        throw new AssignmentParseError(`Assignment ${index} is not a valid object`);
+      }
       const assignment = raw as Record<string, unknown>;
       if (typeof assignment.itemName !== 'string' || !validNames.has(assignment.itemName)) {
         throw new AssignmentParseError(`Assignment ${index} references an unknown item`);
+      }
+      if (assignedNames.has(assignment.itemName)) {
+        throw new AssignmentParseError(`Item "${assignment.itemName}" was assigned more than once`);
       }
       const personLabels = assignment.personLabels;
       if (
@@ -69,8 +75,8 @@ export function parseGeminiAssignmentResponse(rawText: string, validItemNames: s
       ) {
         throw new AssignmentParseError(`Assignment ${index} (${assignment.itemName}) has no valid people assigned`);
       }
-      assignedNames.add(assignment.itemName as string);
-      return { itemName: assignment.itemName as string, personLabels: personLabels as string[] };
+      assignedNames.add(assignment.itemName);
+      return { itemName: assignment.itemName, personLabels: personLabels as string[] };
     });
 
     const missing = validItemNames.filter((name) => !assignedNames.has(name));

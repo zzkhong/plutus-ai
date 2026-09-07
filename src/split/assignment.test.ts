@@ -77,6 +77,26 @@ test('parseGeminiAssignmentResponse allows requesterLabel to be null when ambigu
   assert.equal(result.requesterLabel, null);
 });
 
+test('parseGeminiAssignmentResponse throws when the same item is assigned more than once', () => {
+  const raw = `{"mode": "itemized", "itemAssignments": [
+    {"itemName": "Burger", "personLabels": ["Alice"]},
+    {"itemName": "Burger", "personLabels": ["Bob"]},
+    {"itemName": "Salad", "personLabels": ["me"]},
+    {"itemName": "Fries", "personLabels": ["me"]}
+  ], "requesterLabel": "me"}`;
+  assert.throws(() => parseGeminiAssignmentResponse(raw, ITEM_NAMES), AssignmentParseError);
+});
+
+test('parseGeminiAssignmentResponse throws AssignmentParseError (not a raw TypeError) when itemAssignments is not an array', () => {
+  const raw = `{"mode": "itemized", "itemAssignments": {}, "requesterLabel": "me"}`;
+  assert.throws(() => parseGeminiAssignmentResponse(raw, ITEM_NAMES), AssignmentParseError);
+});
+
+test('parseGeminiAssignmentResponse throws AssignmentParseError (not a raw TypeError) when an assignment element is null', () => {
+  const raw = `{"mode": "itemized", "itemAssignments": [null], "requesterLabel": "me"}`;
+  assert.throws(() => parseGeminiAssignmentResponse(raw, ITEM_NAMES), AssignmentParseError);
+});
+
 test('parseSplitInstructions surfaces a Gemini/network failure as AssignmentParseError', async () => {
   const originalFetch = global.fetch;
   global.fetch = (() => {
