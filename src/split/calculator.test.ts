@@ -124,3 +124,19 @@ test('calculateItemizedSplit keeps every share total summing exactly to items to
   const expected = items.reduce((acc, i) => acc + i.price, 0) + 1.23;
   assert.ok(Math.abs(sum - expected) < 0.005);
 });
+
+test('calculateItemizedSplit guarantees an exact-cent sum even when item-subtotal rounding alone would drift', () => {
+  const result = calculateItemizedSplit(
+    [{ name: 'Shared Item', price: 10 }],
+    0,
+    [{ itemName: 'Shared Item', personLabels: ['A', 'B', 'C'] }],
+    'A',
+  );
+
+  const sum = result.shares.reduce((acc, s) => acc + s.total, 0);
+  assert.equal(sum, 10);
+  // every share.total must equal itemSubtotal + taxAndTipShare exactly, including the last
+  for (const share of result.shares) {
+    assert.equal(share.total, Math.round((share.itemSubtotal + share.taxAndTipShare) * 100) / 100);
+  }
+});

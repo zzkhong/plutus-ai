@@ -61,18 +61,25 @@ export function calculateItemizedSplit(
   const labels = Array.from(subtotalByLabel.keys());
   const totalItemsAssigned = Array.from(subtotalByLabel.values()).reduce((sum, v) => sum + v, 0);
   const shares: PersonShare[] = [];
+  let allocatedItemSubtotal = 0;
   let allocatedTaxTip = 0;
 
   labels.forEach((label, index) => {
-    const itemSubtotal = subtotalByLabel.get(label)!;
-    const proportion = totalItemsAssigned > 0 ? itemSubtotal / totalItemsAssigned : 0;
+    const rawItemSubtotal = subtotalByLabel.get(label)!;
+    const proportion = totalItemsAssigned > 0 ? rawItemSubtotal / totalItemsAssigned : 0;
     const isLast = index === labels.length - 1;
+
+    const itemSubtotal = isLast
+      ? round2(totalItemsAssigned - allocatedItemSubtotal)
+      : round2(rawItemSubtotal);
+    allocatedItemSubtotal = round2(allocatedItemSubtotal + itemSubtotal);
+
     const taxAndTipShare = isLast ? round2(taxAndTip - allocatedTaxTip) : round2(taxAndTip * proportion);
     allocatedTaxTip = round2(allocatedTaxTip + taxAndTipShare);
 
     shares.push({
       label,
-      itemSubtotal: round2(itemSubtotal),
+      itemSubtotal,
       taxAndTipShare,
       total: round2(itemSubtotal + taxAndTipShare),
     });
