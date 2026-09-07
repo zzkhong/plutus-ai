@@ -19,6 +19,8 @@ import { handleHelpCommand } from './commands/help';
 import { handleTextMessage } from './handlers/text';
 import { handleVoiceMessage } from './handlers/voice';
 import { handleDocumentMessage } from './handlers/document';
+import { handleSplitCommand, handleCancelCommand, handleSplitPhoto, handleSplitTextMessage } from './commands/split';
+import { getSplitState } from '../split/state';
 
 export class PlutoBot {
   private bot: Bot;
@@ -81,12 +83,27 @@ export class PlutoBot {
       await this.replyWithText(ctx, response);
     });
 
+    this.bot.command('split', async (ctx) => {
+      const response = handleSplitCommand(ctx.chat.id);
+      await this.replyWithText(ctx, response);
+    });
+
+    this.bot.command('cancel', async (ctx) => {
+      const response = handleCancelCommand(ctx.chat.id);
+      await this.replyWithText(ctx, response);
+    });
+
     this.bot.command('help', async (ctx) => {
       const response = await handleHelpCommand();
       await this.replyWithText(ctx, response);
     });
 
     this.bot.on('message:text', async (ctx) => {
+      if (getSplitState(ctx.chat.id)) {
+        const response = await handleSplitTextMessage(ctx.chat.id, ctx.message.text);
+        await this.replyWithText(ctx, response);
+        return;
+      }
       const response = await handleTextMessage(ctx.message.text);
       await this.replyWithText(ctx, response);
     });
@@ -110,6 +127,20 @@ export class PlutoBot {
       const response = await fetch(fileUrl);
       const buffer = Buffer.from(await response.arrayBuffer());
       const reply = await handleDocumentMessage(buffer, document.mime_type ?? '');
+      await this.replyWithText(ctx, reply);
+    });
+
+    this.bot.on('message:photo', async (ctx) => {
+      const photos = ctx.message.photo;
+      if (!photos || photos.length === 0) {
+        return;
+      }
+      const largest = photos[photos.length - 1];
+      const file = await ctx.api.getFile(largest.file_id);
+      const fileUrl = `https://api.telegram.org/file/bot${config.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+      const response = await fetch(fileUrl);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const reply = await handleSplitPhoto(ctx.chat.id, buffer, 'image/jpeg');
       await this.replyWithText(ctx, reply);
     });
 

@@ -27,35 +27,37 @@ was paid — logging it again from `/split` too would double-count it.
 
 ## Acceptance Criteria
 
-- [ ] `/split` starts the flow and asks for a receipt photo; any other
+**Status: implemented.**
+
+- [x] `/split` starts the flow and asks for a receipt photo; any other
       message while idle is unaffected (no implicit trigger on a bare
       photo)
-- [ ] The photo is sent to the user's LLM for vision extraction:
+- [x] The photo is sent to the user's LLM for vision extraction:
       merchant (if visible), line items (name + price), subtotal, tax/
       service charge/tip, and total, returned as strict JSON
-- [ ] Extraction failure (blurry photo, not a receipt, unparseable
+- [x] Extraction failure (blurry photo, not a receipt, unparseable
       response) replies asking for a resend — no rule-based fallback,
       same convention as `statement-parser.ts`
-- [ ] After extraction, the bot asks: split evenly, or who had what
-- [ ] **Even split**: a headcount divides the total (items + tax/tip)
+- [x] After extraction, the bot asks: split evenly, or who had what
+- [x] **Even split**: a headcount divides the total (items + tax/tip)
       evenly across that many people
-- [ ] **Itemized split**: free text naming people/items is matched by
+- [x] **Itemized split**: free text naming people/items is matched by
       the LLM against the extracted line items; each named person's
       tax/service/tip share is proportional to their share of the
       pre-tax subtotal, not split evenly regardless of order size
-- [ ] The bot identifies which share is the requester's own from their
+- [x] The bot identifies which share is the requester's own from their
       wording ("I", "me"); if it can't tell confidently, it asks
       before showing the breakdown
-- [ ] The bot always shows the full per-person breakdown, then asks
+- [x] The bot always shows the full per-person breakdown, then asks
       "Log your share of $X as an expense?" — a hint notes to skip
       this if it's already been auto-logged some other way (e.g. Apple
       Pay)
-- [ ] **Yes** → the requester's own share only is logged via the
+- [x] **Yes** → the requester's own share only is logged via the
       existing `logExpense` (`source: 'split'`); other people's shares
       are never logged anywhere, since they may not be Plutus users
-- [ ] **No** → nothing is logged; the flow just ends
-- [ ] `/cancel` aborts the flow at any stage
-- [ ] A stale/abandoned flow (bot restarted mid-flow) is not resumed —
+- [x] **No** → nothing is logged; the flow just ends
+- [x] `/cancel` aborts the flow at any stage
+- [x] A stale/abandoned flow (bot restarted mid-flow) is not resumed —
       the user just runs `/split` again
 
 ---

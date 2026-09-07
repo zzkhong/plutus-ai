@@ -18,6 +18,7 @@ export function formatHelpMessage(): string {
     '/budget - budget status',
     '/export - export your data',
     '/undo - undo the last transaction',
+    '/split - split a bill from a receipt photo',
     '/digest - preview tonight\'s digest',
     '/help - this menu',
     '',
