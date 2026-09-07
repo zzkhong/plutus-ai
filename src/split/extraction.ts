@@ -1,0 +1,105 @@
+/**
+ * Extracts line items from a photo of a receipt via Gemini multimodal
+ * vision. No rule-based fallback — any failure surfaces as
+ * ExtractionError, matching the degrade-don't-guess convention used by
+ * src/portfolio/statement-parser.ts.
+ */
+
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { config } from '../config';
+import { Currency } from '../types';
+import { ExtractedReceipt, ReceiptItem } from './types';
+
+export class ExtractionError extends Error {}
+
+const VALID_CURRENCIES = new Set(['SGD', 'MYR', 'USD']);
+
+const SYSTEM_INSTRUCTION = `You are a receipt parser for Pluto AI's bill-splitting feature. You will receive a photo of a restaurant/food receipt. Extract every purchased line item (not tax, not service charge, not tip, not the total) with its price, plus the merchant name if visible, the currency, the sum of any tax/service charge/tip lines, and the final total. Return strict JSON only, matching exactly this shape:
+{"merchant": string | null, "items": [{"name": string, "price": number}], "taxAndTip": number, "total": number, "currency": "SGD" | "MYR" | "USD"}
+Prices are plain decimal numbers, no currency symbols. If you cannot read the receipt clearly, return {"merchant": null, "items": [], "taxAndTip": 0, "total": 0, "currency": "SGD"}.`;
+
+export function parseGeminiReceiptResponse(rawText: string): ExtractedReceipt {
+  const start = rawText.indexOf('{');
+  const end = rawText.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) {
+    throw new ExtractionError('Gemini returned an unparseable response');
+  }
+
+  let parsed: {
+    merchant?: string | null;
+    items?: unknown[];
+    taxAndTip?: unknown;
+    total?: unknown;
+    currency?: string;
+  };
+  try {
+    parsed = JSON.parse(rawText.slice(start, end + 1));
+  } catch {
+    throw new ExtractionError('Gemini returned invalid JSON');
+  }
+
+  const rawItems = (parsed.items ?? []) as unknown[];
+  if (rawItems.length === 0) {
+    throw new ExtractionError('No line items found on the receipt — try a clearer photo');
+  }
+
+  const items: ReceiptItem[] = rawItems.map((raw, index) => {
+    const item = raw as Record<string, unknown>;
+    if (typeof item.name !== 'string' || item.name.trim() === '') {
+      throw new ExtractionError(`Item ${index} is missing a valid name`);
+    }
+    if (typeof item.price !== 'number' || !Number.isFinite(item.price) || item.price <= 0) {
+      throw new ExtractionError(`Item ${index} (${item.name}) has an invalid price`);
+    }
+    return { name: item.name, price: item.price };
+  });
+
+  if (typeof parsed.taxAndTip !== 'number' || !Number.isFinite(parsed.taxAndTip) || parsed.taxAndTip < 0) {
+    throw new ExtractionError('Missing or invalid taxAndTip');
+  }
+  if (typeof parsed.total !== 'number' || !Number.isFinite(parsed.total) || parsed.total <= 0) {
+    throw new ExtractionError('Missing or invalid total');
+  }
+  if (typeof parsed.currency !== 'string' || !VALID_CURRENCIES.has(parsed.currency)) {
+    throw new ExtractionError('Missing or unrecognized currency');
+  }
+
+  return {
+    merchant: typeof parsed.merchant === 'string' && parsed.merchant.trim() !== '' ? parsed.merchant : null,
+    items,
+    taxAndTip: parsed.taxAndTip,
+    total: parsed.total,
+    currency: parsed.currency as Currency,
+  };
+}
+
+export async function extractReceipt(photoBuffer: Buffer, mimeType: string): Promise<ExtractedReceipt> {
+  try {
+    const genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3.6-flash',
+      systemInstruction: SYSTEM_INSTRUCTION,
+    });
+
+    // Vision calls run slower than short text-classification prompts (ai.ts's
+    // 15s budget) — 30s gives enough headroom, matching statement-parser.ts.
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Gemini receipt extraction timed out after 30s')), 30000);
+    });
+
+    const result = await Promise.race([
+      model.generateContent([
+        { inlineData: { mimeType, data: photoBuffer.toString('base64') } },
+        { text: 'Extract the receipt as instructed and return only the JSON.' },
+      ]),
+      timeoutPromise,
+    ]);
+
+    return parseGeminiReceiptResponse(result.response.text());
+  } catch (error) {
+    if (error instanceof ExtractionError) {
+      throw error;
+    }
+    throw new ExtractionError(`Gemini receipt extraction failed: ${(error as Error).message}`);
+  }
+}
