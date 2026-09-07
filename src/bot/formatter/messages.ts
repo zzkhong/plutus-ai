@@ -19,6 +19,7 @@ export function formatHelpMessage(): string {
     '/export - export your data',
     '/undo - undo the last transaction',
     '/split - split a bill from a receipt photo',
+    '/cancel - cancel an in-progress split',
     '/digest - preview tonight\'s digest',
     '/help - this menu',
     '',

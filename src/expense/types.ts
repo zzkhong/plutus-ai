@@ -4,7 +4,7 @@
 
 import { Category, Currency, Transaction } from '../types';
 
-export type ExpenseSource = 'apple_pay' | 'text' | 'voice';
+export type ExpenseSource = 'apple_pay' | 'text' | 'voice' | 'split';
 export type SpendingPeriod = 'today' | 'week' | 'month';
 
 export interface ExpenseInput {

@@ -51,6 +51,21 @@ test('parseGeminiReceiptResponse throws ExtractionError on a missing/invalid tot
   assert.throws(() => parseGeminiReceiptResponse(raw), ExtractionError);
 });
 
+test('parseGeminiReceiptResponse merges duplicate-named items instead of dropping one', () => {
+  const raw = `{"merchant": "Cafe", "items": [{"name": "Iced Milo", "price": 3.2}, {"name": "Toast", "price": 5}, {"name": "Iced Milo", "price": 3.2}], "taxAndTip": 0, "total": 11.4, "currency": "SGD"}`;
+
+  const result = parseGeminiReceiptResponse(raw);
+
+  assert.equal(result.items.length, 2);
+  const milo = result.items.find((i) => i.name === 'Iced Milo');
+  assert.equal(milo?.price, 6.4);
+});
+
+test('parseGeminiReceiptResponse throws ExtractionError when items+taxAndTip and total disagree beyond tolerance', () => {
+  const raw = `{"merchant": null, "items": [{"name": "Coffee", "price": 4}], "taxAndTip": 0, "total": 20, "currency": "SGD"}`;
+  assert.throws(() => parseGeminiReceiptResponse(raw), ExtractionError);
+});
+
 test('extractReceipt surfaces a Gemini/network failure as ExtractionError, not a thrown network error', async () => {
   const originalFetch = global.fetch;
   global.fetch = (() => {

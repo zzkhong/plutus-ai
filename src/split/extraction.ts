@@ -14,6 +14,10 @@ export class ExtractionError extends Error {}
 
 const VALID_CURRENCIES = new Set(['SGD', 'MYR', 'USD']);
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 const SYSTEM_INSTRUCTION = `You are a receipt parser for Pluto AI's bill-splitting feature. You will receive a photo of a restaurant/food receipt. Extract every purchased line item (not tax, not service charge, not tip, not the total) with its price, plus the merchant name if visible, the currency, the sum of any tax/service charge/tip lines, and the final total. Return strict JSON only, matching exactly this shape:
 {"merchant": string | null, "items": [{"name": string, "price": number}], "taxAndTip": number, "total": number, "currency": "SGD" | "MYR" | "USD"}
 Prices are plain decimal numbers, no currency symbols. If you cannot read the receipt clearly, return {"merchant": null, "items": [], "taxAndTip": 0, "total": 0, "currency": "SGD"}.`;
@@ -43,7 +47,7 @@ export function parseGeminiReceiptResponse(rawText: string): ExtractedReceipt {
     throw new ExtractionError('No line items found on the receipt — try a clearer photo');
   }
 
-  const items: ReceiptItem[] = rawItems.map((raw, index) => {
+  const validatedItems: ReceiptItem[] = rawItems.map((raw, index) => {
     const item = raw as Record<string, unknown>;
     if (typeof item.name !== 'string' || item.name.trim() === '') {
       throw new ExtractionError(`Item ${index} is missing a valid name`);
@@ -54,6 +58,15 @@ export function parseGeminiReceiptResponse(rawText: string): ExtractedReceipt {
     return { name: item.name, price: item.price };
   });
 
+  // Merge items that share a name (e.g. the same drink ordered twice as two
+  // separate lines) so downstream name-keyed lookups (calculator.ts,
+  // assignment.ts) never silently collapse one of them and drop its price.
+  const mergedByName = new Map<string, number>();
+  for (const item of validatedItems) {
+    mergedByName.set(item.name, round2((mergedByName.get(item.name) ?? 0) + item.price));
+  }
+  const items: ReceiptItem[] = Array.from(mergedByName.entries()).map(([name, price]) => ({ name, price }));
+
   if (typeof parsed.taxAndTip !== 'number' || !Number.isFinite(parsed.taxAndTip) || parsed.taxAndTip < 0) {
     throw new ExtractionError('Missing or invalid taxAndTip');
   }
@@ -62,6 +75,15 @@ export function parseGeminiReceiptResponse(rawText: string): ExtractedReceipt {
   }
   if (typeof parsed.currency !== 'string' || !VALID_CURRENCIES.has(parsed.currency)) {
     throw new ExtractionError('Missing or unrecognized currency');
+  }
+
+  const itemsSum = items.reduce((sum, item) => sum + item.price, 0);
+  const expectedTotal = itemsSum + parsed.taxAndTip;
+  const tolerance = Math.max(0.5, parsed.total * 0.02);
+  if (Math.abs(expectedTotal - parsed.total) > tolerance) {
+    throw new ExtractionError(
+      `The receipt's line items and total don't add up (items+tax/tip: ${expectedTotal.toFixed(2)}, stated total: ${parsed.total.toFixed(2)}) — try a clearer photo`,
+    );
   }
 
   return {

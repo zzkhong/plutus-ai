@@ -22,7 +22,7 @@ function formatBreakdown(result: SplitResult, currency: Currency): string {
 
 export function handleSplitCommand(chatId: number): string {
   startSplit(chatId);
-  return 'Send me a photo of the receipt to split.';
+  return 'Send me a photo of the receipt to split, or /cancel to stop.';
 }
 
 export function handleCancelCommand(chatId: number): string {
@@ -52,6 +52,10 @@ export async function handleSplitTextMessage(chatId: number, message: string): P
   const state = getSplitState(chatId);
   if (!state) {
     throw new Error(`handleSplitTextMessage called with no active split for chat ${chatId}`);
+  }
+
+  if (state.stage === 'awaiting_photo') {
+    return 'Still waiting on a photo of the receipt — send one, or /cancel to stop.';
   }
 
   if (state.stage === 'awaiting_instructions') {

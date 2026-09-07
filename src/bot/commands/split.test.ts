@@ -128,6 +128,17 @@ test('handleSplitPhoto keeps the flow at awaiting_photo and replies with an erro
   }
 });
 
+test('handleSplitTextMessage while awaiting_photo replies helpfully and leaves the stage unchanged', async () => {
+  const { handleSplitCommand, handleSplitTextMessage } = await import('./split');
+  const { getSplitState } = await import('../../split/state');
+
+  handleSplitCommand(3009);
+  const reply = await handleSplitTextMessage(3009, 'ok');
+
+  assert.match(reply, /photo/i);
+  assert.equal(getSplitState(3009)?.stage, 'awaiting_photo');
+});
+
 test('handleSplitTextMessage: even split then Yes logs only the requester share', async () => {
   const { handleSplitCommand, handleSplitPhoto, handleSplitTextMessage } = await import('./split');
   const { getSplitState } = await import('../../split/state');

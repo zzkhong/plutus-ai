@@ -27,7 +27,8 @@ was paid — logging it again from `/split` too would double-count it.
 
 ## Acceptance Criteria
 
-**Status: implemented.**
+**Status: implemented.** See `src/split/` (types, calculator, extraction,
+assignment, state) and `src/bot/commands/split.ts` for the flow.
 
 - [x] `/split` starts the flow and asks for a receipt photo; any other
       message while idle is unaffected (no implicit trigger on a bare
@@ -110,11 +111,11 @@ src/
 ├── split/
 │   ├── types.ts               # ExtractedReceipt, SplitResult, SplitState
 │   ├── extraction.ts          # extractReceipt(photoBuffer) -> ExtractedReceipt
+│   ├── assignment.ts          # parseSplitInstructions — matches free text to receipt items via Gemini
 │   ├── calculator.ts          # pure: calculateEvenSplit, calculateItemizedSplit
 │   └── state.ts                # in-memory Map<chatId, SplitState>
 ├── bot/
 │   ├── commands/split.ts       # /split, /cancel
-│   ├── handlers/photo.ts       # message:photo — new, only meaningful mid-flow
 │   └── index.ts                # wire /split, /cancel, message:photo
 ```
 
