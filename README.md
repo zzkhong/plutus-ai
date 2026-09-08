@@ -1,237 +1,204 @@
-# Plutus AI — Personal Finance AI Assistant
+# Plutus AI
 
-A Telegram-first personal finance assistant. It logs expenses (typed, spoken,
-or auto-captured from Apple Pay), tracks budgets, and sends a nightly
-AI-written spending digest — all backed by a local SQLite database. Message
-understanding is **Gemini-first with no rule-based fallback**: the bot calls
-Gemini to classify every free-text message, and a Gemini call failure surfaces
-as a graceful error rather than falling back to keyword matching.
+A personal finance assistant that lives in Telegram. It tracks a budget, a
+brokerage/crypto/cash portfolio, splits bills from a receipt photo, sends a
+nightly AI-written digest, and can auto-log Apple Pay transactions from an
+iOS Shortcut.
 
-## Status
+Message understanding is **Gemini-first with no rule-based fallback** — if
+Gemini can't classify a message, the bot says so rather than guessing with
+keyword matching. Every classified intent is wired to a real action — see
+[Free-text intents](#free-text-intents-what-actually-happens) below for the
+full list — except voice notes, which are still a stub.
 
-| Module | State |
+## Features
+
+- **Expense logging** — via the `/today`/`/month`/`/export`/`/undo` slash
+  commands, free-text messages ("Spent $4.50 at Ya Kun"), the
+  recurring-transaction cron, and Apple Pay auto-logging via webhook.
+  Currency is resolved per-message (explicit currency > card mapping >
+  merchant/note regex > SGD default) and every amount is normalized to SGD
+  cents for reporting.
+- **Budgets** — set a per-category monthly limit in chat ("Set food budget
+  to $500/month"); `/budget` shows spend-vs-limit with days left in the
+  month, and the bot proactively pings you the first time you cross a
+  threshold.
+- **Portfolio tracker** — `/portfolio` for net worth and allocation across
+  brokerage (upload an IBKR/Moomoo statement PDF), crypto, and cash (add
+  crypto/cash holdings in chat, e.g. "I hold 0.5 BTC"). Prices come from
+  Yahoo Finance and CoinGecko.
+- **Bill splitting** — `/split`, send a receipt photo, then say "split
+  evenly among 3" or "Alice had the burger, I had the salad" — the bot
+  extracts line items, computes each person's share (tax/tip applied
+  proportionally), and can log your own share as an expense.
+- **Daily digest** — an AI-written summary of the day's spending, sent
+  every night at 10pm Asia/Singapore (also available on demand via
+  `/digest`).
+- **Corrections** — "actually that was $12 not $10" retroactively edits
+  your most recent transaction.
+
+### Free-text intents: what actually happens
+
+Every message is classified by Gemini into an intent, and every intent is
+wired to a real action except voice notes:
+
+| You say something like... | What happens |
 |---|---|
-| Foundation (config, db, logger) | ✅ Done |
-| Telegram bot shell + commands | ✅ Done |
-| Expense engine (`/today`, `/month`, `/export`, `/undo`) | ✅ Done |
-| Budget system (`/budget`, natural-language "set food budget to $800") | ✅ Done |
-| Daily digest (`/digest`, 10pm SGT cron) | ✅ Done |
-| iOS Shortcuts webhook (Apple Pay auto-logging) | ✅ Done |
-| Portfolio tracker (`/portfolio`) | 🚧 Stub — returns a placeholder string |
-| Free-text "expense" intent → `logExpense` | 🚧 Not wired — Gemini classifies it correctly but the reply is an acknowledgement only; it does not persist a transaction yet. Use `/today`'s underlying flow, the iOS Shortcut webhook, or natural-language budget/correction messages, which *are* wired, to actually write rows. |
+| "Spent $4.50 at Ya Kun" | **Real** — logs an expense (category inferred by Gemini) |
+| "How much did I spend on food?" | **Real** — pulls real spending data for the mentioned period (today/week/month) |
+| "Set food budget to $500/month" | **Real** — updates your budget |
+| "Actually that was $12 not $10" | **Real** — corrects your last transaction |
+| "I hold 0.5 BTC" | **Real** — adds/updates a portfolio holding |
+| "Netflix $15.98 every 5th" | **Real** — sets up a recurring monthly charge |
+| "Cancel my Spotify subscription" | **Real** — removes a recurring charge matched by merchant name |
+| A voice note | **Stub** — no transcription happens at all; the bot just replies that it received it |
 
-See [docs/tasks/](docs/tasks/) for the module-by-module build plan. (The
-product spec that used to live at `doc/pluto-ai-prd.md` was deleted in commit
-`f6531e4` and hasn't been re-added — there's currently no PRD file in the
-repo.)
+See [CLAUDE.md](CLAUDE.md#request-flow-telegram) for the code-level
+breakdown if you're picking up work here.
 
-## Tech Stack
+## Requirements
 
-| Layer | Technology |
-|---|---|
-| Runtime | Node.js + TypeScript |
-| Database | SQLite (`better-sqlite3`) |
-| ORM | Drizzle ORM (canonical schema — see caveat below) |
-| AI model | Google Gemini (`gemini-3.6-flash`, pinned) |
-| Bot framework | Grammy (Telegram) |
-| HTTP server | Hono (iOS Shortcuts webhook) |
-| Scheduler | node-cron |
-| Validation | Zod |
-| Dev tools | tsx, ESLint (flat config), Prettier |
-
-## Prerequisites
-
-- Node.js 18+ and npm
-- A **Google API key** with Gemini access — [aistudio.google.com/apikey](https://aistudio.google.com/apikey). This is **required**; the app refuses to start without it (no rule-based fallback exists). The free tier is rate-limited (20 requests/day at the time of writing), which is enough for personal use but can throttle test runs — see [Testing](#testing).
-- A **Telegram bot token** from [@BotFather](https://t.me/BotFather) — optional; without it the app still runs (db, scheduler, webhook) but the Telegram bot itself doesn't start.
-- (Optional) `cloudflared`, only if you want the iOS Shortcuts webhook reachable from your phone — see [docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md).
+- Node.js 20+ (better-sqlite3 needs a version with prebuilt native bindings
+  for your platform — see [Troubleshooting](#troubleshooting) if `npm
+  install` tries to compile from source)
+- A [Telegram bot token](https://core.telegram.org/bots#how-do-i-create-a-bot)
+  (optional — everything except the Telegram bot itself, i.e. the webhook
+  and schedulers, still runs without one)
+- A [Google Gemini API key](https://aistudio.google.com/apikey) — **required**,
+  there's no fallback classifier
 
 ## Setup
 
-### 1. Install dependencies
-
 ```bash
+git clone https://github.com/zzkhong/plutus-ai.git
+cd plutus-ai
 npm install
-```
-
-### 2. Configure environment variables
-
-```bash
 cp .env.example .env
 ```
 
 Edit `.env`:
 
-```env
-NODE_ENV=development
-TZ=Asia/Singapore
-DATABASE_URL=./data/pluto.db
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-TELEGRAM_AUTHORIZED_CHAT_ID=your_telegram_chat_id_here
-GOOGLE_API_KEY=your_google_api_key_here
-LOG_LEVEL=info
-PORT=3000
-WEBHOOK_API_KEY=your_webhook_shared_secret_here
-```
+| Variable | Required | Notes |
+|---|---|---|
+| `GOOGLE_API_KEY` | **Yes** | Startup fails without it — every message classification goes through Gemini. |
+| `TELEGRAM_BOT_TOKEN` | No | Without it the bot process still runs (schedulers + webhook), but no Telegram bot starts. |
+| `TELEGRAM_AUTHORIZED_CHAT_ID` | No | Locks the bot to a single chat. Leave unset during setup to discover your chat ID (see below), then set it. |
+| `DATABASE_URL` | No | Defaults to `./data/pluto.db`, created automatically on first run. |
+| `TZ` | Recommended | Set to `Asia/Singapore` so "today" boundaries and the 10pm digest line up correctly. |
+| `WEBHOOK_API_KEY` | No | Only needed for the iOS Shortcuts Apple Pay integration — see [docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md). The webhook server doesn't start without it. |
+| `PORT` | No | Webhook server port, defaults to `3000`. |
 
-Notes:
-- `GOOGLE_API_KEY` is the only variable startup fails without (validated in [src/config/env.ts](src/config/env.ts)).
-- `TZ=Asia/Singapore` is required so "today" boundaries (expense summaries, budget periods, the digest) line up with the digest's 10pm SGT cron schedule.
-- `TELEGRAM_AUTHORIZED_CHAT_ID` restricts the bot to a single chat ([src/bot/middleware/auth.ts](src/bot/middleware/auth.ts)); leaving it unset means auth is open to any chat that finds your bot — fine for local testing, not for anything left running.
-- `WEBHOOK_API_KEY` gates the iOS Shortcuts endpoint (`POST /api/apple-pay`); the webhook server refuses to start without it, since it's meant to be exposed to the internet via a tunnel.
-- The database file and its tables are created automatically on first run — no separate `db:migrate` step is required to get started (Drizzle migrations in `src/db/migrations/` exist for schema evolution, not first-time setup).
+To get a Telegram bot token: message [@BotFather](https://t.me/BotFather),
+`/newbot`, follow the prompts. To find your chat ID: start a chat with your
+new bot, send it any message, then check the app logs on startup (or query
+`https://api.telegram.org/bot<TOKEN>/getUpdates`) for `chat.id`.
 
-### 3. Run it
+## Running
 
 ```bash
-npm run dev
+npm run dev      # hot-reload dev server (tsx)
 ```
 
-You should see log lines for: database initialized, Telegram bot started (if
-`TELEGRAM_BOT_TOKEN` is set), recurring-transaction scheduler running, digest
-scheduler running, and the webhook server listening (if `WEBHOOK_API_KEY` is
-set). Message your bot on Telegram — `/help` lists the available commands.
+On a clean run this creates `./data/pluto.db` and all tables automatically
+— no separate migration step is needed to get started. You should see log
+lines confirming the database, Telegram bot (if configured), recurring
+scheduler, digest scheduler, and webhook server all coming up.
 
-## Testing
+For production:
 
 ```bash
-npm test          # runs all *.test.ts files wired into package.json's test script
-npm run lint       # ESLint over src/ — see caveat below
+npm run build     # tsc -> dist/
+npm run start     # node dist/index.js
 ```
 
-To run one file or filter by test name:
+Drizzle migration commands (`db:generate`, `db:migrate`, `db:studio`) exist
+for schema changes under `src/db/schema.ts` — see
+[CLAUDE.md](CLAUDE.md#two-independent-sqlite-access-paths--read-before-touching-persistence)
+for why the expense module doesn't go through them.
+
+### Try it
+
+In your Telegram chat with the bot:
+
+```
+/help
+Set food budget to $500/month
+/budget
+I hold 0.5 BTC
+/portfolio
+Spent $4.50 at Ya Kun
+/today
+/split
+```
+
+### Testing expense logging directly
+
+Without Telegram, the most direct way to exercise `logExpense` end-to-end
+is the webhook (set `WEBHOOK_API_KEY` in `.env` first):
+
+```bash
+curl -X POST http://localhost:3000/api/apple-pay \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $WEBHOOK_API_KEY" \
+  -d '{"amount": "12.50", "merchant": "McDonald'"'"'s", "card": "DBS"}'
+```
+
+This logs a real transaction (category inferred by Gemini) — `/today` in
+Telegram will then show it, and it'll send a Telegram confirmation if
+`TELEGRAM_AUTHORIZED_CHAT_ID` is set.
+
+### iOS Shortcuts (Apple Pay auto-logging)
+
+Optional. See [docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md)
+for wiring up a Shortcuts automation + Cloudflare Tunnel so Apple Pay
+purchases log themselves.
+
+## Automated tests
+
+```bash
+npm test          # runs the full fixed test list via node's test runner
+npm run lint       # eslint (currently reports pre-existing lint debt, mostly `any` in tests)
+```
+
+Run a single file or filter by name:
 
 ```bash
 npx tsx --test src/expense/expense.test.ts
 npx tsx --test --test-name-pattern="undoLastTransaction" src/expense/expense.test.ts
 ```
 
-**New test files must be added explicitly** to the `test` script in
-[package.json](package.json) — there's no glob discovery.
-
-Caveats:
-- **No test hits the real Gemini API by default.** Every Gemini call site used
-  by the default test run is stubbed: [src/bot/ai.test.ts](src/bot/ai.test.ts)
-  stubs `global.fetch` directly, and [src/expense/expense.test.ts](src/expense/expense.test.ts)
-  / [src/webhook/webhook.test.ts](src/webhook/webhook.test.ts) stub it via the
-  shared helper [src/testing/geminiStub.ts](src/testing/geminiStub.ts), which
-  keyword-matches the merchant/note text in the categorization prompt to
-  return a deterministic category — so `logExpense`'s AI categorization
-  ([src/expense/categorizer.ts](src/expense/categorizer.ts)) never makes a
-  network call in tests. The one exception is opt-in only (see below).
-- Set `RUN_LIVE_AI_TESTS=1` to additionally run the one deliberately-skipped
-  test in `ai.test.ts` that calls the real Gemini API — costs real quota, do
-  this sparingly (the free tier is rate-limited, e.g. 20 requests/day).
-- `./data/test-plutus.db` is deleted and recreated by
-  [src/expense/expense.test.ts](src/expense/expense.test.ts) on each run —
-  don't point `DATABASE_URL` at it.
-- `npm run lint` currently reports real findings (mostly `@typescript-eslint/no-explicit-any`
-  in test files, plus one unused import in `src/index.ts`) — it's not a config
-  problem, just pre-existing lint debt. Don't be surprised if it exits non-zero
-  on a clean checkout.
-
-### Manual smoke test
-
-1. `npm run dev`, confirm the bot responds to `/help` on Telegram.
-2. `/today` and `/month` — should return empty/zero summaries on a fresh db.
-3. Send a natural-language message like `Set food budget to $800/month`, then
-   `/budget` — should show the new budget with 0% spent.
-4. If testing the iOS Shortcuts webhook: `curl http://localhost:3000/api/health`
-   should return `{"status":"ok"}`; full setup (including exposing it via
-   Cloudflare Tunnel) is in [docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md).
-5. `/undo` after logging something via the webhook or a slash command should
-   remove the most recent transaction.
-
-## Available Commands
-
-| Command | Behavior |
-|---|---|
-| `/today` | Today's spending summary |
-| `/month` | Monthly breakdown by category |
-| `/budget` | Budget status per category (also settable via natural language, e.g. "set food budget to $800/month") |
-| `/export` | Export transactions to CSV (`./data/exports/`) |
-| `/undo` | Undo the single most recent transaction |
-| `/digest` | Preview tonight's AI digest on demand |
-| `/portfolio` | Placeholder — not implemented yet |
-| `/help` | List commands |
-
-Free text is also classified by Gemini into `expense \| query \| budget \|
-correction \| recurring \| help \| unknown` — budget-setting and
-transaction-correction messages are fully wired; a message classified as
-"expense" currently gets acknowledged but not persisted (see [Status](#status)).
-
-## Architecture notes
-
-- **Two independent SQLite access paths.** [src/db/client.ts](src/db/client.ts)
-  is a Drizzle-wrapped singleton used for the canonical schema
-  ([src/db/schema.ts](src/db/schema.ts)). [src/expense/service.ts](src/expense/service.ts)
-  opens its **own** raw `better-sqlite3` connection per call and runs
-  hand-written SQL against the same file. They're kept in sync by hand — if
-  you touch a column in `schema.ts`, update the raw SQL in `service.ts` too.
-- All monetary amounts are stored as **integer cents**, never floats.
-  `amount_sgd` is always the SGD-normalized value used for summaries/budgets,
-  regardless of the transaction's original currency.
-- Supported currencies: `SGD` (base), `MYR`, `USD`, `BTC`, `ETH`, `BETH` —
-  hardcoded exchange rates in [src/config/currencies.ts](src/config/currencies.ts),
-  not fetched live.
-- `correctLastTransaction` only ever mutates the single most recent
-  transaction — there's no way to target an arbitrary past one.
-
-## Project Structure
-
-```
-plutus-ai/
-├── src/
-│   ├── index.ts                  # Entry point — wires up db, bot, schedulers, webhook
-│   ├── config/                   # Env validation (Zod), currency table/rates
-│   ├── types/                    # Shared domain types (transaction, portfolio, budget)
-│   ├── db/                       # Drizzle schema/client + migrations
-│   ├── bot/                      # Telegram bot: commands, handlers, middleware, Gemini classifier
-│   ├── expense/                  # Expense engine — logging, categorization, currency resolution
-│   ├── budget/                   # Budget CRUD, progress tracking, alerts
-│   ├── digest/                   # Nightly AI-written spending digest + cron
-│   ├── scheduler/                # Recurring-transaction cron
-│   ├── webhook/                  # iOS Shortcuts Apple Pay webhook (Hono)
-│   └── utils/                    # Logger, currency helpers
-├── docs/
-│   ├── setup/                    # ios-shortcut-setup.md
-│   └── tasks/                    # Module-by-module build plan (01–07)
-├── data/                          # SQLite db + CSV exports (gitignored)
-└── .env.example
-```
-
-## Scripts
-
-```bash
-npm run dev          # run with tsx (hot reload, no build step)
-npm run build         # tsc -> dist/
-npm run start         # run compiled dist/index.js
-npm run lint          # eslint src
-npm run format        # prettier --write src/**/*.ts
-npm test              # node's built-in test runner over the wired-up *.test.ts files
-npm run db:generate   # drizzle-kit generate (new migration from schema changes)
-npm run db:migrate    # apply migrations
-npm run db:studio     # Drizzle Studio, browse the db
-```
+No test hits the real Gemini API by default — every Gemini call site is
+stubbed. `npm test` runs a **fixed list** of test files wired into
+`package.json`'s `test` script, not a glob — a new `*.test.ts` file must be
+added there explicitly or it won't run. See
+[CLAUDE.md](CLAUDE.md#commands) for the current list and the stubbing
+pattern to follow for new tests.
 
 ## Troubleshooting
 
-- **Startup fails immediately with an environment validation error** — check
-  `GOOGLE_API_KEY` is set in `.env`; it's the one required variable.
-- **Bot doesn't respond on Telegram** — confirm `TELEGRAM_BOT_TOKEN` is set and
-  the app logged "Telegram bot started successfully"; if
-  `TELEGRAM_AUTHORIZED_CHAT_ID` is set, make sure you're messaging from that
-  chat.
-- **Gemini classification/categorization errors** — check quota/billing at
-  [ai.dev/rate-limit](https://ai.dev/rate-limit); confirm the model id
-  (`gemini-3.6-flash`, in [src/bot/ai.ts](src/bot/ai.ts) and
-  [src/expense/categorizer.ts](src/expense/categorizer.ts)) is still valid via
-  `GET /v1beta/models` against your key — Gemini model ids get deprecated.
-- **Database looks wrong / want a clean slate** — delete `./data/pluto.db`
-  (loses all local data) and restart; tables are recreated automatically.
-- **iOS Shortcuts webhook unreachable** — see the troubleshooting section of
-  [docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md).
+- **`npm install` fails compiling `better-sqlite3`** — you likely need
+  build tools for native modules (Windows: `npm install -g windows-build-tools`
+  or Visual Studio Build Tools with the C++ workload; macOS: Xcode Command
+  Line Tools; Linux: `build-essential` + `python3`). Prebuilt binaries cover
+  most common Node versions/platforms, so this usually only bites on an
+  unusual combination.
+- **Startup throws `Invalid environment configuration`** — `GOOGLE_API_KEY`
+  is missing or empty in `.env`; check `src/config/env.ts` for the full
+  validated schema.
+- **Bot doesn't respond in Telegram** — confirm `TELEGRAM_BOT_TOKEN` is set
+  and, if `TELEGRAM_AUTHORIZED_CHAT_ID` is set, that you're messaging from
+  that exact chat.
+- **Gemini classification errors** — the model id is pinned in
+  [src/bot/ai.ts](src/bot/ai.ts); if it starts failing outright, check
+  `GET /v1beta/models` against your key for deprecation.
+
+## Project layout
+
+See [CLAUDE.md](CLAUDE.md) for full architecture notes (request flow, the
+two SQLite access paths, module-by-module breakdown) and
+[docs/tasks/](docs/tasks/) for the module-by-module build plan this project
+was implemented against.
 
 ## License
 
-ISC — see [LICENSE](LICENSE).
+ISC

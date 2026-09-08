@@ -3,13 +3,9 @@
  */
 
 import { getSpendingSummary } from '../../expense';
+import { formatSpendingSummary } from '../formatter/messages';
 
 export async function handleTodayCommand(): Promise<string> {
   const summary = await getSpendingSummary('today');
-  const total = (summary.total / 100).toFixed(2);
-  const topCategories = Object.entries(summary.byCategory)
-    .map(([category, amount]) => `${category}: ${(amount / 100).toFixed(2)}`)
-    .join(', ') || 'none';
-
-  return `Today’s spend: S$${total}.\nTransactions: ${summary.count}.\nBy category: ${topCategories}.`;
+  return formatSpendingSummary('Today’s spend', summary);
 }

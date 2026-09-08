@@ -2,6 +2,18 @@
  * Shared message formatting helpers for Telegram responses
  */
 
+import { SpendingSummary } from '../../expense/types';
+
+export function formatSpendingSummary(label: string, summary: SpendingSummary): string {
+  const total = (summary.total / 100).toFixed(2);
+  const topCategories =
+    Object.entries(summary.byCategory)
+      .map(([category, amount]) => `${category}: ${(amount / 100).toFixed(2)}`)
+      .join(', ') || 'none';
+
+  return `${label}: S$${total}.\nTransactions: ${summary.count}.\nBy category: ${topCategories}.`;
+}
+
 export function formatHeading(title: string): string {
   return `*${title}*`;
 }

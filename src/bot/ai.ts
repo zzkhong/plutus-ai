@@ -8,9 +8,11 @@ import { logger } from '../utils/logger';
 import { formatUserFriendlyError } from './formatter/messages';
 import { BotIntent } from './types';
 import { AssetClass, Currency } from '../types';
+import { SpendingPeriod } from '../expense/types';
 
 const VALID_HOLDINGS_ASSET_CLASSES = new Set(['crypto', 'cash']);
 const VALID_CURRENCIES = new Set(['SGD', 'MYR', 'USD', 'BTC', 'ETH', 'BETH']);
+const VALID_SPENDING_PERIODS = new Set(['today', 'week', 'month']);
 
 export interface ExtractedFields {
   amount?: number;
@@ -22,6 +24,7 @@ export interface ExtractedFields {
   symbol?: string;
   assetClass?: string;
   currency?: string;
+  dayOfMonth?: number;
 }
 
 export interface IntentAnalysis {
@@ -79,7 +82,7 @@ export async function classifyUserMessage(rawText: string): Promise<IntentAnalys
     const model = genAI.getGenerativeModel({
       model: 'gemini-3.6-flash',
       systemInstruction:
-        'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action, symbol, assetClass, currency }, rawText. Allowed intents: expense, query, budget, correction, recurring, holdings, help, unknown. The holdings intent covers non-brokerage portfolio updates like "I hold 0.5 BTC" or "cash SGD 5000" — extract symbol (e.g. BTC, SGD), assetClass (crypto or cash), currency, and amount as the quantity. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
+        'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action, symbol, assetClass, currency, dayOfMonth }, rawText. Allowed intents: expense, query, budget, correction, recurring, holdings, help, unknown. The holdings intent covers non-brokerage portfolio updates like "I hold 0.5 BTC" or "cash SGD 5000" — extract symbol (e.g. BTC, SGD), assetClass (crypto or cash), currency, and amount as the quantity. The recurring intent covers repeating charges like "Netflix $15.98 every 5th" or "cancel my Spotify subscription" — extract merchant, amount, and dayOfMonth (1-31, the day of the month it recurs on) for a new one, or action="remove" and merchant for cancelling an existing one. The query intent covers spending questions like "how much did I spend this week" — extract period as one of today, week, or month. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
     });
 
     const prompt = `User message: "${trimmed}"\n\nReturn only valid JSON with keys intent, confidence, extracted, rawText.`;
@@ -127,10 +130,25 @@ export async function buildAssistantReply(result: IntentAnalysis): Promise<strin
 
   switch (intent) {
     case 'expense': {
+      const { logExpense } = await import('../expense/service');
+
       const amount = extracted.amount ?? 0;
-      const merchant = extracted.merchant ?? 'your purchase';
-      const category = extracted.category ?? 'Other';
-      return `Got it — I've flagged this as an expense of $${amount.toFixed(2)} at ${merchant} in ${category}. I'll send it through the spending flow once the expense engine is connected.`;
+      if (amount <= 0) {
+        return `How much did you spend? Try "Spent $4.50 at Ya Kun".`;
+      }
+
+      const currency: Currency | undefined = VALID_CURRENCIES.has(extracted.currency ?? '')
+        ? (extracted.currency as Currency)
+        : undefined;
+
+      const transaction = await logExpense({
+        amount,
+        currency,
+        merchant: extracted.merchant,
+        source: 'text',
+      });
+
+      return `Logged S$${(transaction.amount_sgd / 100).toFixed(2)} at ${transaction.merchant} under ${transaction.category}.`;
     }
     case 'budget': {
       const { setBudget, removeBudget } = await import('../budget/service');
@@ -184,7 +202,48 @@ export async function buildAssistantReply(result: IntentAnalysis): Promise<strin
       return `Updated! Changed ${field} to "${value}" for your last transaction.`;
     }
     case 'recurring': {
-      return `That sounds like a recurring item. I'll keep it in the recurring flow and make sure it gets handled as a repeat expense.`;
+      const { createRecurring, listRecurring, removeRecurring } = await import('../expense/service');
+
+      if (!extracted.merchant) {
+        return `Which recurring merchant? Try "Netflix $15.98 every 5th" or "cancel my Spotify subscription".`;
+      }
+
+      const isRemoval = /remove|delete|cancel|stop/i.test(extracted.action ?? rawText);
+
+      if (isRemoval) {
+        const all = await listRecurring();
+        const match = all.find((r) => r.merchant.toLowerCase() === extracted.merchant!.toLowerCase());
+
+        if (!match) {
+          return `I couldn't find a recurring entry for "${extracted.merchant}".`;
+        }
+
+        await removeRecurring(match.id);
+        return `Done — removed the recurring ${match.merchant} charge.`;
+      }
+
+      const amount = extracted.amount ?? 0;
+      if (amount <= 0) {
+        return `How much is the ${extracted.merchant} charge?`;
+      }
+
+      const dayOfMonth = extracted.dayOfMonth;
+      if (!dayOfMonth || dayOfMonth < 1 || dayOfMonth > 31) {
+        return `Which day of the month does ${extracted.merchant} charge you?`;
+      }
+
+      const currency: Currency | undefined = VALID_CURRENCIES.has(extracted.currency ?? '')
+        ? (extracted.currency as Currency)
+        : undefined;
+
+      const recurring = await createRecurring({
+        amount,
+        currency,
+        merchant: extracted.merchant,
+        day_of_month: dayOfMonth,
+      });
+
+      return `Got it — I'll log $${amount.toFixed(2)} at ${recurring.merchant} every month on day ${recurring.day_of_month}.`;
     }
     case 'holdings': {
       const { addHolding, removeHolding } = await import('../portfolio/service');
@@ -225,7 +284,17 @@ export async function buildAssistantReply(result: IntentAnalysis): Promise<strin
       return `Got it — recorded ${holding.quantity} ${holding.symbol}.`;
     }
     case 'query': {
-      return `I can help with that: "${rawText}". I'll pull the relevant numbers and summarize the result for you once the data layer is live.`;
+      const { getSpendingSummary } = await import('../expense/service');
+      const { formatSpendingSummary } = await import('./formatter/messages');
+
+      const period: SpendingPeriod = VALID_SPENDING_PERIODS.has(extracted.period ?? '')
+        ? (extracted.period as SpendingPeriod)
+        : 'month';
+
+      const summary = await getSpendingSummary(period);
+      const label = period === 'today' ? "Today's spend" : period === 'week' ? "This week's spend" : "This month's spend";
+
+      return formatSpendingSummary(label, summary);
     }
     case 'help': {
       return `Here's what I can do: /portfolio, /today, /month, /budget, /export, /undo, /help. You can also just message me naturally.`;

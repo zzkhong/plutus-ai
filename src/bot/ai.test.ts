@@ -15,22 +15,47 @@ before(async () => {
   runMigrations();
 });
 
-test('buildAssistantReply uses the user message details for expense replies', async () => {
+test('buildAssistantReply logs a real expense transaction for the expense intent', async () => {
+  const { stubGeminiCategorization } = await import('../testing/geminiStub');
+  const restoreGemini = stubGeminiCategorization();
+
+  try {
+    const { buildAssistantReply } = await import('./ai');
+    const reply = await buildAssistantReply({
+      intent: 'expense',
+      confidence: 0.96,
+      extracted: {
+        amount: 4.5,
+        merchant: 'Ya Kun',
+        category: 'Food',
+      },
+      rawText: 'Spent $4.50 at Ya Kun',
+    });
+
+    assert.match(reply, /4\.50/i);
+    assert.match(reply, /Ya Kun/i);
+
+    const { getTopExpenses } = await import('../expense/service');
+    const [logged] = await getTopExpenses('today', 1);
+    assert.ok(logged);
+    assert.equal(logged.merchant, 'Ya Kun');
+    assert.equal(logged.amount, 450);
+    assert.equal(logged.source, 'text');
+  } finally {
+    restoreGemini();
+  }
+});
+
+test('buildAssistantReply asks for an amount when the expense intent has none', async () => {
   const { buildAssistantReply } = await import('./ai');
   const reply = await buildAssistantReply({
     intent: 'expense',
-    confidence: 0.96,
-    extracted: {
-      amount: 4.5,
-      merchant: 'Ya Kun',
-      category: 'Food',
-    },
-    rawText: 'Spent $4.50 at Ya Kun',
+    confidence: 0.4,
+    extracted: { merchant: 'Ya Kun' },
+    rawText: 'bought something at Ya Kun',
   });
 
-  assert.match(reply, /4\.50/i);
-  assert.match(reply, /Ya Kun/i);
-  assert.match(reply, /Food/i);
+  assert.match(reply, /how much/i);
 });
 
 test('buildAssistantReply returns the generic error message when Gemini failed, not a guessed intent', async () => {
@@ -211,4 +236,136 @@ test('buildAssistantReply asks which holding when the holdings intent has no sym
   });
 
   assert.match(reply, /which holding/i);
+});
+
+test('buildAssistantReply answers a query intent with real spending data', async () => {
+  const { stubGeminiCategorization } = await import('../testing/geminiStub');
+  const restoreGemini = stubGeminiCategorization();
+
+  try {
+    const { getSpendingSummary, logExpense } = await import('../expense/service');
+    const before = await getSpendingSummary('today');
+
+    await logExpense({ amount: 10, merchant: 'Fairprice', source: 'text' });
+
+    const { buildAssistantReply } = await import('./ai');
+    const reply = await buildAssistantReply({
+      intent: 'query',
+      confidence: 0.8,
+      extracted: { period: 'today' },
+      rawText: 'How much did I spend today?',
+    });
+
+    const after = await getSpendingSummary('today');
+    assert.equal(after.count, before.count + 1);
+    assert.match(reply, new RegExp(`${(after.total / 100).toFixed(2)}`));
+    assert.match(reply, new RegExp(String(after.count)));
+  } finally {
+    restoreGemini();
+  }
+});
+
+test('buildAssistantReply falls back to a month query when period is not recognized', async () => {
+  const { getSpendingSummary } = await import('../expense/service');
+  const { buildAssistantReply } = await import('./ai');
+  const monthSummary = await getSpendingSummary('month');
+
+  const reply = await buildAssistantReply({
+    intent: 'query',
+    confidence: 0.5,
+    extracted: { period: 'this year' },
+    rawText: 'how much have I spent',
+  });
+
+  assert.match(reply, new RegExp(`${(monthSummary.total / 100).toFixed(2)}`));
+});
+
+test('buildAssistantReply creates a real recurring transaction for the recurring intent', async () => {
+  const { stubGeminiCategorization } = await import('../testing/geminiStub');
+  const restoreGemini = stubGeminiCategorization();
+
+  try {
+    const { buildAssistantReply } = await import('./ai');
+    const reply = await buildAssistantReply({
+      intent: 'recurring',
+      confidence: 0.9,
+      extracted: { amount: 15.98, merchant: 'Netflix', dayOfMonth: 5 },
+      rawText: 'Netflix $15.98 every 5th',
+    });
+
+    assert.match(reply, /Netflix/i);
+    assert.match(reply, /5/);
+
+    const { listRecurring } = await import('../expense/service');
+    const all = await listRecurring();
+    const netflix = all.find((r) => r.merchant === 'Netflix');
+
+    assert.ok(netflix);
+    assert.equal(netflix.amount, 1598);
+    assert.equal(netflix.day_of_month, 5);
+  } finally {
+    restoreGemini();
+  }
+});
+
+test('buildAssistantReply asks for a day of month when the recurring intent has none', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply({
+    intent: 'recurring',
+    confidence: 0.6,
+    extracted: { amount: 15.98, merchant: 'Netflix' },
+    rawText: 'Netflix $15.98 monthly',
+  });
+
+  assert.match(reply, /which day|day of the month/i);
+});
+
+test('buildAssistantReply asks which merchant when the recurring intent has none', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply({
+    intent: 'recurring',
+    confidence: 0.5,
+    extracted: {},
+    rawText: 'set up a recurring payment',
+  });
+
+  assert.match(reply, /which (merchant|subscription|recurring)/i);
+});
+
+test('buildAssistantReply removes a recurring transaction matched by merchant', async () => {
+  const { stubGeminiCategorization } = await import('../testing/geminiStub');
+  const restoreGemini = stubGeminiCategorization();
+
+  try {
+    const { createRecurring, listRecurring } = await import('../expense/service');
+    await createRecurring({ amount: 9.9, merchant: 'Spotify', day_of_month: 1 });
+
+    const { buildAssistantReply } = await import('./ai');
+    const reply = await buildAssistantReply({
+      intent: 'recurring',
+      confidence: 0.9,
+      extracted: { merchant: 'Spotify', action: 'remove' },
+      rawText: 'Cancel my Spotify subscription',
+    });
+
+    assert.match(reply, /removed/i);
+    assert.match(reply, /Spotify/i);
+
+    const all = await listRecurring();
+    assert.ok(!all.some((r) => r.merchant === 'Spotify'));
+  } finally {
+    restoreGemini();
+  }
+});
+
+test('buildAssistantReply tells the user when no matching recurring entry is found to remove', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply({
+    intent: 'recurring',
+    confidence: 0.7,
+    extracted: { merchant: 'NonexistentThing', action: 'remove' },
+    rawText: 'cancel NonexistentThing',
+  });
+
+  assert.match(reply, /couldn.?t find/i);
 });
