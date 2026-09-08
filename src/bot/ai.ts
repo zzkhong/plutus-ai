@@ -8,7 +8,7 @@ import { logger } from '../utils/logger';
 import { formatUserFriendlyError } from './formatter/messages';
 import { BotIntent } from './types';
 import { AssetClass, Currency } from '../types';
-import { SpendingPeriod } from '../expense/types';
+import { ExpenseSource, SpendingPeriod } from '../expense/types';
 
 const VALID_HOLDINGS_ASSET_CLASSES = new Set(['crypto', 'cash']);
 const VALID_CURRENCIES = new Set(['SGD', 'MYR', 'USD', 'BTC', 'ETH', 'BETH']);
@@ -121,7 +121,10 @@ export async function classifyUserMessage(rawText: string): Promise<IntentAnalys
   }
 }
 
-export async function buildAssistantReply(result: IntentAnalysis): Promise<string> {
+export async function buildAssistantReply(
+  result: IntentAnalysis,
+  source: ExpenseSource = 'text',
+): Promise<string> {
   const { intent, extracted, rawText, serviceError } = result;
 
   if (serviceError) {
@@ -145,7 +148,7 @@ export async function buildAssistantReply(result: IntentAnalysis): Promise<strin
         amount,
         currency,
         merchant: extracted.merchant,
-        source: 'text',
+        source,
       });
 
       return `Logged S$${(transaction.amount_sgd / 100).toFixed(2)} at ${transaction.merchant} under ${transaction.category}.`;

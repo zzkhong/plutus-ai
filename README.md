@@ -7,14 +7,15 @@ iOS Shortcut.
 
 Message understanding is **Gemini-first with no rule-based fallback** — if
 Gemini can't classify a message, the bot says so rather than guessing with
-keyword matching. Every classified intent is wired to a real action — see
-[Free-text intents](#free-text-intents-what-actually-happens) below for the
-full list — except voice notes, which are still a stub.
+keyword matching. Every classified intent is wired to a real action, and
+voice notes are transcribed by Gemini and routed the same way typed text
+is — see [Free-text intents](#free-text-intents-what-actually-happens)
+below for the full list.
 
 ## Features
 
 - **Expense logging** — via the `/today`/`/month`/`/export`/`/undo` slash
-  commands, free-text messages ("Spent $4.50 at Ya Kun"), the
+  commands, free-text or voice messages ("Spent $4.50 at Ya Kun"), the
   recurring-transaction cron, and Apple Pay auto-logging via webhook.
   Currency is resolved per-message (explicit currency > card mapping >
   merchant/note regex > SGD default) and every amount is normalized to SGD
@@ -40,7 +41,7 @@ full list — except voice notes, which are still a stub.
 ### Free-text intents: what actually happens
 
 Every message is classified by Gemini into an intent, and every intent is
-wired to a real action except voice notes:
+wired to a real action:
 
 | You say something like... | What happens |
 |---|---|
@@ -51,7 +52,7 @@ wired to a real action except voice notes:
 | "I hold 0.5 BTC" | **Real** — adds/updates a portfolio holding |
 | "Netflix $15.98 every 5th" | **Real** — sets up a recurring monthly charge |
 | "Cancel my Spotify subscription" | **Real** — removes a recurring charge matched by merchant name |
-| A voice note | **Stub** — no transcription happens at all; the bot just replies that it received it |
+| A voice note saying any of the above | **Real** — Gemini transcribes it, then it's routed exactly like typed text (replies are prefixed `Heard: "..."` so you can see what was understood) |
 
 See [CLAUDE.md](CLAUDE.md#request-flow-telegram) for the code-level
 breakdown if you're picking up work here.

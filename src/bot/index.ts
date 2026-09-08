@@ -113,8 +113,12 @@ export class PlutoBot {
       if (!voice) {
         return;
       }
-      const response = await handleVoiceMessage(String(voice.file_id));
-      await this.replyWithText(ctx, response);
+      const file = await ctx.api.getFile(voice.file_id);
+      const fileUrl = `https://api.telegram.org/file/bot${config.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+      const response = await fetch(fileUrl);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const reply = await handleVoiceMessage(ctx.chat.id, buffer, voice.mime_type ?? 'audio/ogg');
+      await this.replyWithText(ctx, reply);
     });
 
     this.bot.on('message:document', async (ctx) => {
