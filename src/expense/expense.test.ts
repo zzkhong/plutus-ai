@@ -67,6 +67,9 @@ test('undoLastTransaction removes the most recent entry', async () => {
   assert.ok(undone);
   const after = await getSpendingSummary(userId, 'month');
   assert.ok(after.total <= before.total);
+
+  // Drain the second transaction so Test 3's isolation check is against a genuinely empty set
+  await undoLastTransaction(userId);
 });
 
 test('undoLastTransaction only ever affects the calling user', async () => {
