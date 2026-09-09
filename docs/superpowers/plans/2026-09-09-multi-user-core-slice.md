@@ -21,7 +21,9 @@
 - `/setup`'s onboarding still asks "which provider" but only `gemini` validates this slice — see the spec for why.
 - New test files must be added to the `test` script in `package.json` in the same task that introduces them, or `npm test` won't run them.
 - **Expect a "red window":** Task 1 adds `NOT NULL user_id` columns to `transactions`, `holdings`, `budgets`, `budget_alerts`, and `recurring_transactions`. Until Task 11 (the last of the per-module persistence migrations) lands, the *full* `npm test` suite will fail for not-yet-migrated modules — this is expected, not a regression to chase. Run the specific test file for the task you're on (`npx tsx --test <file>`) rather than the full suite until Task 11 completes; from Task 12 onward the full suite should stay green after every task.
-- **Verified drizzle-kit quirk:** `npm run db:generate` was spiked against this exact schema change during planning. It runs non-interactively (no prompt), but its generated `ALTER TABLE ... ADD user_id text NOT NULL REFERENCES users(id);` statements **silently drop `ON DELETE CASCADE`** even though the schema declares it (confirmed: SQLite itself honors `ON DELETE CASCADE` fine when present in an `ALTER TABLE ADD COLUMN` statement — this is specifically a drizzle-kit generator gap for the ADD-COLUMN diff path, not a SQLite limitation). Task 1 includes a manual fix-up step for this — don't skip it, or user deletion won't cascade.
+- **Verified drizzle-kit quirks (two, both confirmed against this exact schema change, the second one during execution after the original single-step spike turned out to be incomplete):**
+  1. Its generated `ALTER TABLE ... ADD user_id text NOT NULL REFERENCES users(id);` statements **silently drop `ON DELETE CASCADE`** even though the schema declares it (confirmed: SQLite itself honors `ON DELETE CASCADE` fine when present in an `ALTER TABLE ADD COLUMN` statement — this is specifically a drizzle-kit generator gap for the ADD-COLUMN diff path, not a SQLite limitation). Task 1 includes a manual fix-up step for this — don't skip it, or user deletion won't cascade.
+  2. Running `db:generate` against a schema diff that **both adds a table and removes a table in the same pass** (adding `users` while dropping `user_config`) triggers drizzle-kit's rename-ambiguity heuristic (`promptNamedWithSchemasConflict`), which requires interactive TTY confirmation and hard-fails with `Error: Interactive prompts require a TTY terminal` in any non-interactive shell (confirmed in both a dispatched subagent's shell and the controller's own). **Fix: split it into two separate `db:generate` invocations** — first add `users` and the five `user_id` columns with `user_config` still present in the schema (a pure addition, generates cleanly), then in a second pass remove `user_config` from the schema and generate again (a solo drop, also generates cleanly since there's no counterpart addition in that pass to look like a rename). Task 1 is written this way — follow its step order exactly; don't try to do both in one schema edit.
 
 ## File Structure
 
@@ -49,14 +51,16 @@ Modified files (grouped by task below): `src/db/schema.ts`, `src/config/env.ts`,
 **Files:**
 - Modify: `src/db/schema.ts`
 - Modify: `src/config/currencies.ts:20-21` (stale `user_config` comment)
-- Create: `src/db/migrations/000X_<generated-name>.sql` (via `npm run db:generate`)
+- Create: two migration files via `npm run db:generate`, run twice — `src/db/migrations/000X_<generated-name>.sql` (adds `users` + all five `user_id` columns) and `src/db/migrations/000Y_<generated-name>.sql` (drops `user_config`) — see the two-pass note below
 
 **Interfaces:**
 - Produces: `users` Drizzle table (columns: `id`, `telegram_chat_id`, `status`, `is_admin`, `llm_provider`, `llm_api_key_encrypted`, `webhook_api_key`, `created_at`, `updated_at`); `user_id` column added to `transactions`, `holdings`, `budgets`, `budget_alerts`, `recurring_transactions`.
 
-- [ ] **Step 1: Add the `users` table and `user_id` columns to `src/db/schema.ts`**
+This task is split into two schema-then-generate passes on purpose (see Global Constraints' second verified drizzle-kit quirk) — **do not** add `users` and remove `user_config` in the same `db:generate` invocation, or drizzle-kit hard-fails demanding an interactive TTY prompt that doesn't exist in an automated shell.
 
-Add the `users` table **before** `transactions` (so the `() => users.id` reference resolves cleanly the same way `budget_alerts` already references `budgets`), and add a `user_id` column to each of the five existing tables. Also delete the `user_config` table definition entirely.
+- [ ] **Step 1: Add the `users` table and `user_id` columns to `src/db/schema.ts` — leave `user_config` in place for now**
+
+Add the `users` table **before** `transactions` (so the `() => users.id` reference resolves cleanly the same way `budget_alerts` already references `budgets`), and add a `user_id` column to each of the five existing tables. Leave the existing `user_config` table definition and the `primaryKey` import exactly as they are — they come out in Step 4, after the first migration is generated.
 
 ```typescript
 // Users table
@@ -178,15 +182,15 @@ export const recurring_transactions = sqliteTable('recurring_transactions', {
 
 Delete the entire `user_config` table export at the bottom of the file. The `primaryKey` import becomes unused once it's gone — remove it from the `drizzle-orm/sqlite-core` import list too.
 
-- [ ] **Step 2: Generate the migration**
+- [ ] **Step 2: Generate the first migration (pure addition)**
 
 Run: `npm run db:generate`
 
-Expected: a new file `src/db/migrations/000X_<random-name>.sql` (drizzle-kit names it randomly, e.g. `0004_fat_newton_destine.sql` — this was verified during planning to run non-interactively with no prompts).
+Expected: this runs non-interactively (verified — a pure addition with no table removed in the same pass never hits the rename-ambiguity prompt) and produces a new file `src/db/migrations/000X_<random-name>.sql` (drizzle-kit names it randomly, e.g. `0004_dazzling_marvex.sql`) containing a `CREATE TABLE users (...)`, two `CREATE UNIQUE INDEX` statements, and five `ALTER TABLE ... ADD user_id ...` statements (one per existing table) — no `DROP TABLE` statement yet, since `user_config` is still in the schema.
 
 - [ ] **Step 3: Fix the missing `ON DELETE CASCADE` (verified drizzle-kit gap — see Global Constraints)**
 
-Open the generated migration file. It will contain five lines shaped like:
+Open the migration file Step 2 generated. It will contain five lines shaped like:
 
 ```sql
 ALTER TABLE `transactions` ADD `user_id` text NOT NULL REFERENCES users(id);
@@ -198,9 +202,17 @@ Manually append ` ON DELETE CASCADE` before the semicolon on **all five** `ALTER
 ALTER TABLE `transactions` ADD `user_id` text NOT NULL REFERENCES users(id) ON DELETE CASCADE;
 ```
 
-Leave the `CREATE TABLE users (...)`, the two `CREATE UNIQUE INDEX` statements, and the `DROP TABLE user_config` statement (if drizzle-kit emitted one — if it didn't, add `DROP TABLE \`user_config\`;` as the final statement yourself) exactly as generated.
+Leave the `CREATE TABLE users (...)` and the two `CREATE UNIQUE INDEX` statements exactly as generated.
 
-- [ ] **Step 4: Fix the stale `user_config` comment**
+- [ ] **Step 4: Remove `user_config` from `src/db/schema.ts`, then generate the second migration (solo drop)**
+
+Now delete the `user_config` table export from `src/db/schema.ts` entirely, and remove the now-unused `primaryKey` import from the `drizzle-orm/sqlite-core` import list.
+
+Run: `npm run db:generate` again.
+
+Expected: this runs non-interactively (verified — a solo removal with nothing added in the same pass never hits the rename-ambiguity prompt either) and produces a **second** new migration file containing exactly one statement: `DROP TABLE \`user_config\`;`.
+
+- [ ] **Step 5: Fix the stale `user_config` comment**
 
 In `src/config/currencies.ts:20-21`, change:
 
@@ -215,18 +227,22 @@ to:
 // Card to currency mapping
 ```
 
-- [ ] **Step 5: Verify the migration applies cleanly**
+- [ ] **Step 6: Verify both migrations apply cleanly, and that no further changes are pending**
 
 Run: `rm -f ./data/test-schema-check.db && DATABASE_URL=./data/test-schema-check.db npx tsx src/db/migrate.ts && rm -f ./data/test-schema-check.db`
 
-Expected: `Migrations completed successfully!` with no errors.
+Expected: `Migrations completed successfully!` with no errors (both the Step 2 and Step 4 migration files apply in order).
 
-- [ ] **Step 6: Commit**
+Then run `npm run db:generate` one more time. Expected: `No schema changes, nothing to migrate` (or equivalent) — confirming the two migrations together fully match `schema.ts` and no third migration is silently needed.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/db/schema.ts src/db/migrations/ src/config/currencies.ts
 git commit -m "feat(db): add users table, user_id FKs on every table, drop user_config"
 ```
+
+Both migration files (the addition and the drop) go into this one commit — they're one logical schema change split across two `db:generate` calls only because of the tooling limitation above, not two separate pieces of work.
 
 ---
 
