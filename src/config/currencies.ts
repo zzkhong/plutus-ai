@@ -18,7 +18,6 @@ export const CURRENCIES: Record<Currency, { symbol: string; name: string }> = {
 export const BASE_CURRENCY: Currency = 'SGD';
 
 // Card to currency mapping
-// This can be overridden by user configuration in user_config table
 export const DEFAULT_CARD_CURRENCY_MAP: Record<string, Currency> = {
   'OCBC iPhone': 'SGD',
   'OCBC': 'SGD',

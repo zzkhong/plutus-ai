@@ -8,12 +8,31 @@ import {
   text,
   integer,
   real,
-  primaryKey,
 } from 'drizzle-orm/sqlite-core';
+
+// Users table
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  telegram_chat_id: text('telegram_chat_id').notNull().unique(),
+  status: text('status').notNull(), // 'onboarding' | 'pending_approval' | 'approved'
+  is_admin: integer('is_admin').notNull().default(0),
+  llm_provider: text('llm_provider'), // 'gemini' for now; widened in a later slice
+  llm_api_key_encrypted: text('llm_api_key_encrypted'),
+  webhook_api_key: text('webhook_api_key').unique(),
+  created_at: integer('created_at')
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+  updated_at: integer('updated_at')
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+});
 
 // Transactions table
 export const transactions = sqliteTable('transactions', {
   id: text('id').primaryKey(),
+  user_id: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   amount: integer('amount').notNull(), // in cents
   currency: text('currency').notNull(),
   amount_sgd: integer('amount_sgd').notNull(), // normalized to SGD in cents
@@ -33,6 +52,9 @@ export const transactions = sqliteTable('transactions', {
 // Holdings (portfolio) table
 export const holdings = sqliteTable('holdings', {
   id: text('id').primaryKey(),
+  user_id: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   symbol: text('symbol').notNull(),
   name: text('name').notNull(),
   asset_class: text('asset_class').notNull(),
@@ -52,6 +74,9 @@ export const holdings = sqliteTable('holdings', {
 // Budgets table
 export const budgets = sqliteTable('budgets', {
   id: text('id').primaryKey(),
+  user_id: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   category: text('category').notNull(),
   amount: integer('amount').notNull(), // in cents
   currency: text('currency').notNull(),
@@ -68,6 +93,9 @@ export const budgets = sqliteTable('budgets', {
 // Budget alert dedup table — one row per (budget, threshold, month) once sent
 export const budget_alerts = sqliteTable('budget_alerts', {
   id: text('id').primaryKey(),
+  user_id: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   budget_id: text('budget_id')
     .notNull()
     .references(() => budgets.id, { onDelete: 'cascade' }),
@@ -81,6 +109,9 @@ export const budget_alerts = sqliteTable('budget_alerts', {
 // Recurring transactions table
 export const recurring_transactions = sqliteTable('recurring_transactions', {
   id: text('id').primaryKey(),
+  user_id: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
   amount: integer('amount').notNull(), // in cents
   currency: text('currency').notNull(),
   merchant: text('merchant').notNull(),
@@ -94,15 +125,3 @@ export const recurring_transactions = sqliteTable('recurring_transactions', {
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
 });
-
-// User configuration table (key-value store)
-export const user_config = sqliteTable(
-  'user_config',
-  {
-    key: text('key').notNull(),
-    value: text('value').notNull(),
-  },
-  (table) => ({
-    pk: primaryKey({ columns: [table.key] }),
-  }),
-);
