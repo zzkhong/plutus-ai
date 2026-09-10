@@ -120,7 +120,7 @@ test('removeBudget succeeds and cascades even after an alert has fired for that 
   const { budget_alerts } = await import('../db/schema');
   const { eq } = await import('drizzle-orm');
 
-  const budget = await setBudget(userId, 'Insurance', 150, 'SGD');
+  const budget = await setBudget(userId, 'Others', 150, 'SGD');
 
   // Simulate an alert having already fired this month for this budget, which
   // is what previously made the FK constraint reject removeBudget's delete.
@@ -133,9 +133,9 @@ test('removeBudget succeeds and cascades even after an alert has fired for that 
     sent_at: Date.now(),
   });
 
-  await assert.doesNotReject(() => removeBudget(userId, 'Insurance'));
+  await assert.doesNotReject(() => removeBudget(userId, 'Others'));
 
-  const remainingBudget = await findBudgetByCategory(userId, 'Insurance');
+  const remainingBudget = await findBudgetByCategory(userId, 'Others');
   assert.equal(remainingBudget, null);
 
   const remainingAlerts = await db.select().from(budget_alerts).where(eq(budget_alerts.budget_id, budget.id));
