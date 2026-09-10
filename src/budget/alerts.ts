@@ -16,9 +16,7 @@ function currentMonthKey(now = new Date()): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-// Dedup is recorded on detection, not on confirmed delivery — a send failure after
-// this point means the alert is not retried until next month's dedup key resets.
-async function markAlertSent(budgetId: string, threshold: 80 | 100, month: string): Promise<boolean> {
+async function markAlertSent(userId: string, budgetId: string, threshold: 80 | 100, month: string): Promise<boolean> {
   const existing = await db
     .select()
     .from(budget_alerts)
@@ -36,6 +34,7 @@ async function markAlertSent(budgetId: string, threshold: 80 | 100, month: strin
 
   await db.insert(budget_alerts).values({
     id: randomUUID(),
+    user_id: userId,
     budget_id: budgetId,
     threshold,
     month,
@@ -53,20 +52,20 @@ function formatAlertMessage(category: string, threshold: 80 | 100, spentSgd: num
   return `${icon} ${category} budget alert: you've ${verb} ${threshold}% (S$${spent} / S$${limit}) this month.`;
 }
 
-export async function checkAlerts(transaction: Transaction): Promise<Alert | null> {
-  const budget = await findBudgetByCategory(transaction.category);
+export async function checkAlerts(userId: string, transaction: Transaction): Promise<Alert | null> {
+  const budget = await findBudgetByCategory(userId, transaction.category);
   if (!budget || budget.amount_sgd <= 0) {
     return null;
   }
 
-  const spending = await getSpendingByCategory('month');
+  const spending = await getSpendingByCategory(userId, 'month');
   const spentSgd = spending.find((entry) => entry.category === transaction.category)?.total ?? 0;
   const percentage = (spentSgd / budget.amount_sgd) * 100;
   const month = currentMonthKey();
 
   if (percentage >= 100) {
-    const fired = await markAlertSent(budget.id, 100, month);
-    await markAlertSent(budget.id, 80, month);
+    const fired = await markAlertSent(userId, budget.id, 100, month);
+    await markAlertSent(userId, budget.id, 80, month);
     if (!fired) {
       return null;
     }
@@ -79,7 +78,7 @@ export async function checkAlerts(transaction: Transaction): Promise<Alert | nul
   }
 
   if (percentage >= 80) {
-    const fired = await markAlertSent(budget.id, 80, month);
+    const fired = await markAlertSent(userId, budget.id, 80, month);
     if (!fired) {
       return null;
     }

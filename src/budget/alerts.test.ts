@@ -11,18 +11,24 @@ if (fs.existsSync(testDbPath)) {
   fs.rmSync(testDbPath, { force: true });
 }
 
+let userId: string;
+
 before(async () => {
   const { runMigrations } = await import('../db/migrate');
   runMigrations();
+  const { createUser } = await import('../users/service');
+  const user = await createUser('test-budget-alerts-chat');
+  userId = user.id;
 });
 
-async function insertTransaction(category: string, amountSgdCents: number) {
+async function insertTransaction(forUserId: string, category: string, amountSgdCents: number) {
   const { db, transactions } = await import('../db');
   const now = Date.now();
   const id = randomUUID();
 
   await db.insert(transactions).values({
     id,
+    user_id: forUserId,
     amount: amountSgdCents,
     currency: 'SGD',
     amount_sgd: amountSgdCents,
@@ -50,9 +56,9 @@ async function insertTransaction(category: string, amountSgdCents: number) {
 
 test('checkAlerts returns null when there is no budget for the category', async () => {
   const { checkAlerts } = await import('./alerts');
-  const txn = await insertTransaction('Travel', 1000);
+  const txn = await insertTransaction(userId, 'Travel', 1000);
 
-  const alert = await checkAlerts(txn);
+  const alert = await checkAlerts(userId, txn);
   assert.equal(alert, null);
 });
 
@@ -60,15 +66,15 @@ test('checkAlerts fires once at 80% and not again for a later transaction under 
   const { setBudget } = await import('./service');
   const { checkAlerts } = await import('./alerts');
 
-  await setBudget('Food', 100, 'SGD'); // S$100 budget
+  await setBudget(userId, 'Food', 100, 'SGD'); // S$100 budget
 
-  const first = await insertTransaction('Food', 8500); // 85%
-  const firstAlert = await checkAlerts(first);
+  const first = await insertTransaction(userId, 'Food', 8500); // 85%
+  const firstAlert = await checkAlerts(userId, first);
   assert.ok(firstAlert);
   assert.equal(firstAlert!.threshold, 80);
 
-  const second = await insertTransaction('Food', 100); // 86%, still under 100%
-  const secondAlert = await checkAlerts(second);
+  const second = await insertTransaction(userId, 'Food', 100); // 86%, still under 100%
+  const secondAlert = await checkAlerts(userId, second);
   assert.equal(secondAlert, null);
 });
 
@@ -76,15 +82,15 @@ test('checkAlerts fires the 100% alert once when spend crosses it', async () => 
   const { setBudget } = await import('./service');
   const { checkAlerts } = await import('./alerts');
 
-  await setBudget('Shopping', 100, 'SGD');
+  await setBudget(userId, 'Shopping', 100, 'SGD');
 
-  const pushOver = await insertTransaction('Shopping', 10500); // 105%
-  const alert = await checkAlerts(pushOver);
+  const pushOver = await insertTransaction(userId, 'Shopping', 10500); // 105%
+  const alert = await checkAlerts(userId, pushOver);
   assert.ok(alert);
   assert.equal(alert!.threshold, 100);
 
-  const again = await insertTransaction('Shopping', 100);
-  const repeat = await checkAlerts(again);
+  const again = await insertTransaction(userId, 'Shopping', 100);
+  const repeat = await checkAlerts(userId, again);
   assert.equal(repeat, null);
 });
 
@@ -94,21 +100,36 @@ test('checkAlerts re-fires in a new month even if already sent in a previous mon
   const { db } = await import('../db');
   const { budget_alerts } = await import('../db/schema');
 
-  await setBudget('Bills', 100, 'SGD');
-  const budget = await findBudgetByCategory('Bills');
+  await setBudget(userId, 'Bills', 100, 'SGD');
+  const budget = await findBudgetByCategory(userId, 'Bills');
   assert.ok(budget);
 
   await db.insert(budget_alerts).values({
     id: randomUUID(),
+    user_id: userId,
     budget_id: budget!.id,
     threshold: 80,
     month: '2000-01',
     sent_at: Date.now(),
   });
 
-  const txn = await insertTransaction('Bills', 8500);
-  const alert = await checkAlerts(txn);
+  const txn = await insertTransaction(userId, 'Bills', 8500);
+  const alert = await checkAlerts(userId, txn);
 
   assert.ok(alert);
   assert.equal(alert!.threshold, 80);
+});
+
+test('checkAlerts never fires off another user\'s budget or spending', async () => {
+  const { createUser } = await import('../users/service');
+  const { setBudget } = await import('./service');
+  const { checkAlerts } = await import('./alerts');
+  const otherUser = await createUser('test-budget-alerts-other-chat');
+
+  await setBudget(otherUser.id, 'Health', 100, 'SGD');
+  // userId (the calling user) has no 'Health' budget at all.
+  const txn = await insertTransaction(userId, 'Health', 9000);
+
+  const alert = await checkAlerts(userId, txn);
+  assert.equal(alert, null);
 });
