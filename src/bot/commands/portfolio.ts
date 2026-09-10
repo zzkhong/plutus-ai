@@ -5,8 +5,8 @@
 import { getPortfolioSummary } from '../../portfolio';
 import { formatCurrency } from '../../config';
 
-export async function handlePortfolioCommand(): Promise<string> {
-  const summary = await getPortfolioSummary();
+export async function handlePortfolioCommand(userId: string): Promise<string> {
+  const summary = await getPortfolioSummary(userId);
 
   if (summary.holdings.length === 0) {
     return 'No holdings yet. Upload an IBKR/Moomoo statement PDF, or tell me something like "I hold 0.5 BTC" or "cash SGD 5000" to get started.';

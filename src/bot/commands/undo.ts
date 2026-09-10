@@ -4,8 +4,8 @@
 
 import { undoLastTransaction } from '../../expense';
 
-export async function handleUndoCommand(): Promise<string> {
-  const removed = await undoLastTransaction();
+export async function handleUndoCommand(userId: string): Promise<string> {
+  const removed = await undoLastTransaction(userId);
 
   if (!removed) {
     return 'There is no transaction to undo yet.';

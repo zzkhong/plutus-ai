@@ -4,6 +4,6 @@
 
 import { buildDigestMessage } from '../../digest';
 
-export async function handleDigestCommand(): Promise<string> {
-  return buildDigestMessage();
+export async function handleDigestCommand(userId: string): Promise<string> {
+  return buildDigestMessage(userId);
 }

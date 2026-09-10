@@ -4,8 +4,8 @@
 
 import { getBudgetStatus } from '../../budget';
 
-export async function handleBudgetCommand(): Promise<string> {
-  const statuses = await getBudgetStatus();
+export async function handleBudgetCommand(userId: string): Promise<string> {
+  const statuses = await getBudgetStatus(userId);
 
   if (statuses.length === 0) {
     return 'No budgets set yet. Try "Set food budget to $800/month" to create one.';

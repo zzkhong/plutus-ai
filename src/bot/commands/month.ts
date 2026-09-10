@@ -5,7 +5,7 @@
 import { getSpendingSummary } from '../../expense';
 import { formatSpendingSummary } from '../formatter/messages';
 
-export async function handleMonthCommand(): Promise<string> {
-  const summary = await getSpendingSummary('month');
+export async function handleMonthCommand(userId: string): Promise<string> {
+  const summary = await getSpendingSummary(userId, 'month');
   return formatSpendingSummary('This month’s spend', summary);
 }
