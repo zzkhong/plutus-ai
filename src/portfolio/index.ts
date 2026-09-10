@@ -13,10 +13,10 @@ export { parseStatement, StatementParseError } from './statement-parser';
 export { getPrice } from './price-fetcher';
 export { calculateNetWorth, calculateAllocation, enrichHolding, buildPortfolioSummary } from './calculator';
 
-export async function getPortfolioSummary(): Promise<PortfolioSummary> {
-  const holdings = await listHoldings();
+export async function getPortfolioSummary(userId: string): Promise<PortfolioSummary> {
+  const holdingsList = await listHoldings(userId);
   const enriched = await Promise.all(
-    holdings.map(async (holding) => enrichHolding(holding, await getPrice(holding))),
+    holdingsList.map(async (holding) => enrichHolding(holding, await getPrice(holding))),
   );
   return buildPortfolioSummary(enriched);
 }
