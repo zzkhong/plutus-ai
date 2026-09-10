@@ -2,8 +2,8 @@
  * Gemini-powered intent extraction and reply generation for the Telegram assistant
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { config } from '../config';
+import { getProviderForUser } from '../llm/provider';
+import { findById } from '../users/service';
 import { logger } from '../utils/logger';
 import { formatUserFriendlyError } from './formatter/messages';
 import { BotIntent } from './types';
@@ -65,7 +65,7 @@ function safeJsonParse(text: string): Partial<IntentAnalysis> | null {
   }
 }
 
-export async function classifyUserMessage(rawText: string): Promise<IntentAnalysis> {
+export async function classifyUserMessage(userId: string, rawText: string): Promise<IntentAnalysis> {
   const trimmed = rawText.trim();
 
   if (!trimmed) {
@@ -78,27 +78,24 @@ export async function classifyUserMessage(rawText: string): Promise<IntentAnalys
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3.6-flash',
-      systemInstruction:
-        'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action, symbol, assetClass, currency, dayOfMonth }, rawText. Allowed intents: expense, query, budget, correction, recurring, holdings, help, unknown. The holdings intent covers non-brokerage portfolio updates like "I hold 0.5 BTC" or "cash SGD 5000" — extract symbol (e.g. BTC, SGD), assetClass (crypto or cash), currency, and amount as the quantity. The recurring intent covers repeating charges like "Netflix $15.98 every 5th" or "cancel my Spotify subscription" — extract merchant, amount, and dayOfMonth (1-31, the day of the month it recurs on) for a new one, or action="remove" and merchant for cancelling an existing one. The query intent covers spending questions like "how much did I spend this week" — extract period as one of today, week, or month. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
-    });
+    const user = await findById(userId);
+    if (!user) {
+      throw new Error(`No user found with id ${userId}`);
+    }
+    const provider = getProviderForUser(user);
 
     const prompt = `User message: "${trimmed}"\n\nReturn only valid JSON with keys intent, confidence, extracted, rawText.`;
-    
-    // gemini-3.6-flash's reasoning overhead routinely takes ~5s for this prompt,
-    // so the timeout needs enough headroom to not misfire as a service error.
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Gemini API call timed out after 15s')), 15000);
+
+    // gemini-3.6-flash's reasoning overhead routinely takes ~5s for this
+    // prompt, so the timeout needs enough headroom to not misfire as a
+    // service error.
+    const response = await provider.generateText({
+      systemInstruction:
+        'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action, symbol, assetClass, currency, dayOfMonth }, rawText. Allowed intents: expense, query, budget, correction, recurring, holdings, help, unknown. The holdings intent covers non-brokerage portfolio updates like "I hold 0.5 BTC" or "cash SGD 5000" — extract symbol (e.g. BTC, SGD), assetClass (crypto or cash), currency, and amount as the quantity. The recurring intent covers repeating charges like "Netflix $15.98 every 5th" or "cancel my Spotify subscription" — extract merchant, amount, and dayOfMonth (1-31, the day of the month it recurs on) for a new one, or action="remove" and merchant for cancelling an existing one. The query intent covers spending questions like "how much did I spend this week" — extract period as one of today, week, or month. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
+      contents: [{ text: prompt }],
+      timeoutMs: 15000,
     });
-    
-    const result = await Promise.race([
-      model.generateContent(prompt),
-      timeoutPromise,
-    ]);
-    
-    const response = result.response.text();
+
     const parsed = safeJsonParse(response);
 
     if (!parsed) {

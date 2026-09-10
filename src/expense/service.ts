@@ -71,7 +71,7 @@ export async function logExpense(userId: string, data: ExpenseInput): Promise<Tr
 
   const amountCents = centsFromAmount(data.amount);
   const merchant = (data.merchant ?? 'Unknown merchant').trim() || 'Unknown merchant';
-  const category = await inferCategory({ merchant, note: data.note, amount: amountCents });
+  const category = await inferCategory(userId, { merchant, note: data.note, amount: amountCents });
   const now = Date.now();
   const amountSgd = toSGD(amountCents, normalizedCurrency);
 
@@ -193,7 +193,7 @@ export async function correctLastTransaction(userId: string, field: string, valu
   if (normalizedField === 'merchant') {
     updates.merchant = value;
   } else if (normalizedField === 'category') {
-    updates.category = await inferCategory({ merchant: row.merchant, note: value, amount: row.amount });
+    updates.category = await inferCategory(userId, { merchant: row.merchant, note: value, amount: row.amount });
   } else if (normalizedField === 'note') {
     updates.note = value;
   } else if (normalizedField === 'amount') {
@@ -280,7 +280,7 @@ function mapRecurringRow(row: typeof recurring_transactions.$inferSelect): Recur
 
 export async function createRecurring(userId: string, data: RecurringInput): Promise<RecurringTransaction> {
   const amount = centsFromAmount(data.amount);
-  const category = data.category ?? (await inferCategory({ merchant: data.merchant, amount }));
+  const category = data.category ?? (await inferCategory(userId, { merchant: data.merchant, amount }));
   const now = Date.now();
 
   const [inserted] = await db

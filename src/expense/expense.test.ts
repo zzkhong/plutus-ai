@@ -18,9 +18,12 @@ before(async () => {
   restoreGeminiStub = stubGeminiCategorization();
   const { runMigrations } = await import('../db/migrate');
   runMigrations();
-  const { createUser } = await import('../users/service');
+  const { createUser, setProvider, completeSetup } = await import('../users/service');
+  const { encrypt } = await import('../users/crypto');
   const user = await createUser('test-expense-chat');
   userId = user.id;
+  await setProvider(userId, 'gemini');
+  await completeSetup(userId, encrypt('fake-key-for-stubbed-tests'), true);
 });
 
 after(() => {

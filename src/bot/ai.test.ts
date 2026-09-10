@@ -10,9 +10,17 @@ if (fs.existsSync(aiTestDbPath)) {
   fs.rmSync(aiTestDbPath, { force: true });
 }
 
+let userId: string;
+
 before(async () => {
   const { runMigrations } = await import('../db/migrate');
   runMigrations();
+  const { createUser, setProvider, completeSetup } = await import('../users/service');
+  const { encrypt } = await import('../users/crypto');
+  const user = await createUser('test-ai-chat');
+  await setProvider(user.id, 'gemini');
+  await completeSetup(user.id, encrypt('fake-key-for-stubbed-tests'), true); // isAdmin so it lands on 'approved' immediately
+  userId = user.id;
 });
 
 test('buildAssistantReply logs a real expense transaction for the expense intent', async () => {
@@ -75,11 +83,15 @@ test(
   'classifyUserMessage returns expense intent for a real Gemini call',
   { skip: !process.env.RUN_LIVE_AI_TESTS && 'set RUN_LIVE_AI_TESTS=1 to run this against the real Gemini API' },
   async () => {
-    // Pluto AI is Gemini-first with no rule-based fallback (see doc/tasks/02-telegram-bot.md),
-    // so this exercises the real API using GOOGLE_API_KEY from the environment.
-    // Opt-in only (RUN_LIVE_AI_TESTS=1): costs real API credits and needs network access.
     const { classifyUserMessage } = await import('./ai');
-    const result = await classifyUserMessage('Spent $4.50 at Ya Kun');
+    const { setProvider, completeSetup } = await import('../users/service');
+    const { encrypt } = await import('../users/crypto');
+    const { config } = await import('../config');
+
+    await setProvider(userId, 'gemini');
+    await completeSetup(userId, encrypt(config.GOOGLE_API_KEY), true);
+
+    const result = await classifyUserMessage(userId, 'Spent $4.50 at Ya Kun');
     assert.equal(result.intent, 'expense');
     assert.equal(result.serviceError, undefined);
   },
@@ -93,7 +105,7 @@ test('classifyUserMessage degrades gracefully instead of guessing when the Gemin
 
   try {
     const { classifyUserMessage } = await import('./ai');
-    const result = await classifyUserMessage('Spent $4.50 at Ya Kun');
+    const result = await classifyUserMessage(userId, 'Spent $4.50 at Ya Kun');
     assert.equal(result.intent, 'unknown');
     assert.equal(result.serviceError, true);
   } finally {

@@ -1,9 +1,9 @@
 /**
- * AI-powered expense categorization using Gemini, tuned for Singapore / Malaysia usage.
+ * AI-powered expense categorization, tuned for Singapore / Malaysia usage.
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { config } from '../config';
+import { getProviderForUser } from '../llm/provider';
+import { findById } from '../users/service';
 import { Category } from '../types';
 import { logger } from '../utils/logger';
 
@@ -40,24 +40,18 @@ function safeJsonParse(text: string): Partial<CategorizationResult> | null {
 
 export function normalizeCategoryName(rawCategory: string): Category {
   const normalized = rawCategory.trim();
-
-  // Find exact match (case-insensitive)
-  const match = VALID_CATEGORIES.find(
-    (cat) => cat.toLowerCase() === normalized.toLowerCase()
-  );
-
+  const match = VALID_CATEGORIES.find((cat) => cat.toLowerCase() === normalized.toLowerCase());
   return match || 'Others';
 }
 
 /**
- * Use Gemini to categorize an expense based on merchant name and note.
- * Falls back to 'Others' if categorization fails.
+ * Use the calling user's own LLM provider to categorize an expense based on
+ * merchant name and note. Falls back to 'Others' if categorization fails.
  */
-export async function inferCategory(input: {
-  merchant?: string;
-  note?: string;
-  amount?: number;
-}): Promise<Category> {
+export async function inferCategory(
+  userId: string,
+  input: { merchant?: string; note?: string; amount?: number },
+): Promise<Category> {
   const haystack = [input.merchant, input.note].filter(Boolean).join(' ');
 
   if (!haystack.trim()) {
@@ -65,9 +59,19 @@ export async function inferCategory(input: {
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3.6-flash',
+    const user = await findById(userId);
+    if (!user) {
+      throw new Error(`No user found with id ${userId}`);
+    }
+    const provider = getProviderForUser(user);
+
+    const prompt = `Merchant: "${input.merchant || 'unknown'}"
+Note: "${input.note || ''}"
+Amount: ${input.amount ? `$${(input.amount / 100).toFixed(2)}` : 'unknown'}
+
+Return only JSON with category and confidence.`;
+
+    const response = await provider.generateText({
       systemInstruction: `You are an expense categorization assistant for users in Singapore and Malaysia.
 Categorize expenses into exactly one of these categories: ${VALID_CATEGORIES.join(', ')}.
 
@@ -84,16 +88,9 @@ Guidelines:
 - Others: anything that doesn't fit above
 
 Return only valid JSON with keys: category, confidence (0-1).`,
+      contents: [{ text: prompt }],
     });
 
-    const prompt = `Merchant: "${input.merchant || 'unknown'}"
-Note: "${input.note || ''}"
-Amount: ${input.amount ? `$${(input.amount / 100).toFixed(2)}` : 'unknown'}
-
-Return only JSON with category and confidence.`;
-
-    const result = await model.generateContent(prompt);
-    const response = result.response.text();
     const parsed = safeJsonParse(response);
 
     if (!parsed || !parsed.category) {
