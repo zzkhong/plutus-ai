@@ -3,7 +3,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { budgets } from '../db/schema';
 import { toSGD } from '../config';
@@ -23,6 +23,7 @@ function mapBudgetRow(row: typeof budgets.$inferSelect): Budget {
 }
 
 export async function setBudget(
+  userId: string,
   category: Category,
   amount: number,
   currency: Currency = 'SGD',
@@ -31,7 +32,11 @@ export async function setBudget(
   const amountSgd = toSGD(amountCents, currency);
   const now = Date.now();
 
-  const existing = await db.select().from(budgets).where(eq(budgets.category, category)).get();
+  const existing = await db
+    .select()
+    .from(budgets)
+    .where(and(eq(budgets.user_id, userId), eq(budgets.category, category)))
+    .get();
 
   if (existing) {
     const [updated] = await db
@@ -46,6 +51,7 @@ export async function setBudget(
     .insert(budgets)
     .values({
       id: randomUUID(),
+      user_id: userId,
       category,
       amount: amountCents,
       currency,
@@ -59,16 +65,20 @@ export async function setBudget(
   return mapBudgetRow(inserted);
 }
 
-export async function removeBudget(category: Category): Promise<void> {
-  await db.delete(budgets).where(eq(budgets.category, category));
+export async function removeBudget(userId: string, category: Category): Promise<void> {
+  await db.delete(budgets).where(and(eq(budgets.user_id, userId), eq(budgets.category, category)));
 }
 
-export async function listBudgets(): Promise<Budget[]> {
-  const rows = await db.select().from(budgets).orderBy(budgets.category);
+export async function listBudgets(userId: string): Promise<Budget[]> {
+  const rows = await db.select().from(budgets).where(eq(budgets.user_id, userId)).orderBy(budgets.category);
   return rows.map(mapBudgetRow);
 }
 
-export async function findBudgetByCategory(category: Category): Promise<Budget | null> {
-  const row = await db.select().from(budgets).where(eq(budgets.category, category)).get();
+export async function findBudgetByCategory(userId: string, category: Category): Promise<Budget | null> {
+  const row = await db
+    .select()
+    .from(budgets)
+    .where(and(eq(budgets.user_id, userId), eq(budgets.category, category)))
+    .get();
   return row ? mapBudgetRow(row) : null;
 }
