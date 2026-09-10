@@ -13,13 +13,21 @@ if (fs.existsSync(testDbPath)) {
 
 const originalFetch = global.fetch;
 
+let userId: string;
+
 before(async () => {
   const { runMigrations } = await import('../db/migrate');
   runMigrations();
+  const { createUser, setProvider, completeSetup } = await import('../users/service');
+  const { encrypt } = await import('../users/crypto');
+  const user = await createUser('test-digest-chat');
+  await setProvider(user.id, 'gemini');
+  await completeSetup(user.id, encrypt('fake-key-for-tests'), true);
+  userId = user.id;
 
   // No test in this file needs a real Gemini call — stub fetch so
-  // generateSummaryLine (Task 5) deterministically falls back to its
-  // rule-based line, keeping the suite network-free by default.
+  // generateSummaryLine deterministically falls back to its rule-based
+  // line, keeping the suite network-free by default.
   global.fetch = (() => {
     throw new Error('simulated network failure');
   }) as typeof fetch;
@@ -43,7 +51,7 @@ test('settle passes a resolved value through unchanged', async () => {
 
 test('collectDigestData returns real data for all live sources and a permanent portfolio stub', async () => {
   const { collectDigestData } = await import('./aggregator');
-  const data = await collectDigestData();
+  const data = await collectDigestData(userId);
 
   assert.ok('total' in (data.spending as object));
   assert.ok(Array.isArray(data.recurringFired));
@@ -167,7 +175,7 @@ test('generateSummaryLine falls back to "Watch {category} spending." when a budg
     portfolio: { error: 'not yet implemented' },
   };
 
-  const line = await generateSummaryLine(data as any);
+  const line = await generateSummaryLine(userId, data as any);
   assert.equal(line, 'Watch Food spending.');
 });
 
@@ -181,7 +189,7 @@ test('generateSummaryLine falls back to "All good." when no budget is over thres
     portfolio: { error: 'not yet implemented' },
   };
 
-  const line = await generateSummaryLine(data as any);
+  const line = await generateSummaryLine(userId, data as any);
   assert.equal(line, 'All good.');
 });
 

@@ -3,8 +3,8 @@
  * rule-based line if the call fails, times out, or returns nothing.
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { config } from '../config';
+import { getProviderForUser } from '../llm/provider';
+import { findById } from '../users/service';
 import { logger } from '../utils/logger';
 import { DigestData, SectionResult } from './types';
 
@@ -33,35 +33,29 @@ function buildPrompt(data: DigestData): string {
   }. Write one short, friendly one-line comment (under 15 words, no emoji) for a personal finance digest message.`;
 }
 
-export async function generateSummaryLine(data: DigestData): Promise<string> {
+export async function generateSummaryLine(userId: string, data: DigestData): Promise<string> {
   try {
-    const genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3.6-flash',
-      systemInstruction:
-        'You are Pluto AI, a personal finance assistant. Reply with exactly one short plain-text sentence, no markdown, no quotes.',
-    });
-
-    let timeoutHandle: NodeJS.Timeout;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(() => reject(new Error('Gemini summary call timed out after 5s')), 5000);
-    });
-
-    try {
-      const result = await Promise.race([model.generateContent(buildPrompt(data)), timeoutPromise]);
-      clearTimeout(timeoutHandle!);
-      const text = result.response.text().trim();
-
-      if (!text) {
-        logger.warn('Gemini returned an empty digest summary, falling back to rule-based line');
-        return ruleBasedSummary(data);
-      }
-
-      return text;
-    } catch (error) {
-      clearTimeout(timeoutHandle!);
-      throw error;
+    const user = await findById(userId);
+    if (!user) {
+      throw new Error(`No user found with id ${userId}`);
     }
+    const provider = getProviderForUser(user);
+
+    const text = (
+      await provider.generateText({
+        systemInstruction:
+          'You are Pluto AI, a personal finance assistant. Reply with exactly one short plain-text sentence, no markdown, no quotes.',
+        contents: [{ text: buildPrompt(data) }],
+        timeoutMs: 5000,
+      })
+    ).trim();
+
+    if (!text) {
+      logger.warn('Gemini returned an empty digest summary, falling back to rule-based line');
+      return ruleBasedSummary(data);
+    }
+
+    return text;
   } catch (error) {
     logger.error('Gemini digest summary failed, falling back to rule-based line', error);
     return ruleBasedSummary(data);

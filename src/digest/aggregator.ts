@@ -19,11 +19,11 @@ export async function settle<T>(section: string, promise: Promise<T>): Promise<S
   }
 }
 
-export async function collectDigestData(): Promise<DigestData> {
+export async function collectDigestData(userId: string): Promise<DigestData> {
   const [spending, recurringFired, budgetStatuses] = await Promise.all([
-    settle('spending', getSpendingSummary('today')),
-    settle('recurringFired', getRecurringFiredToday()),
-    settle('budgetStatuses', getBudgetStatus()),
+    settle('spending', getSpendingSummary(userId, 'today')),
+    settle('recurringFired', getRecurringFiredToday(userId)),
+    settle('budgetStatuses', getBudgetStatus(userId)),
   ]);
 
   return {
