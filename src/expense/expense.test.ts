@@ -115,3 +115,84 @@ test('exportCSV writes a per-user file scoped to that user\'s transactions', asy
   assert.ok(fs.existsSync(filePath));
   assert.match(filePath, new RegExp(userId));
 });
+
+test('recurring transactions can be fired for today', async () => {
+  const { createRecurring, fireRecurringForToday } = await import('./index');
+  const recurring = await createRecurring(userId, {
+    amount: 2500,
+    currency: 'SGD',
+    merchant: 'Netflix',
+    category: 'Entertainment',
+    day_of_month: new Date().getDate(),
+    is_active: true,
+  });
+
+  const fired = await fireRecurringForToday(userId);
+  assert.ok(fired.some((item) => item.merchant === recurring.merchant));
+});
+
+test('getRecurringFiredToday reports already-fired recurring transactions without inserting new ones', async () => {
+  const { createRecurring, fireRecurringForToday, getRecurringFiredToday } = await import('./index');
+  const recurring = await createRecurring(userId, {
+    amount: 500,
+    currency: 'SGD',
+    merchant: 'Spotify',
+    category: 'Entertainment',
+    day_of_month: new Date().getDate(),
+    is_active: true,
+  });
+
+  await fireRecurringForToday(userId);
+
+  const first = await getRecurringFiredToday(userId);
+  const second = await getRecurringFiredToday(userId);
+
+  assert.equal(first.length, second.length);
+  assert.ok(first.some((t) => t.merchant === recurring.merchant));
+  assert.ok(first.every((t) => t.source === 'recurring'));
+});
+
+test('fireRecurringForToday only fires the calling user\'s own due recurring entries', async () => {
+  const { createUser } = await import('../users/service');
+  const { createRecurring, fireRecurringForToday } = await import('./index');
+  const otherUser = await createUser('test-expense-recurring-other-chat');
+
+  await createRecurring(otherUser.id, {
+    amount: 999,
+    currency: 'SGD',
+    merchant: 'Other User Gym',
+    category: 'Health',
+    day_of_month: new Date().getDate(),
+    is_active: true,
+  });
+
+  const firedForUserId = await fireRecurringForToday(userId);
+  assert.ok(!firedForUserId.some((t) => t.merchant === 'Other User Gym'));
+
+  const firedForOtherUser = await fireRecurringForToday(otherUser.id);
+  assert.ok(firedForOtherUser.some((t) => t.merchant === 'Other User Gym'));
+});
+
+test('removeRecurring only deletes when the id belongs to the calling user', async () => {
+  const { createUser } = await import('../users/service');
+  const { createRecurring, removeRecurring, listRecurring } = await import('./index');
+  const otherUser = await createUser('test-expense-remove-recurring-other-chat');
+
+  const theirs = await createRecurring(otherUser.id, {
+    amount: 100,
+    currency: 'SGD',
+    merchant: 'Their Subscription',
+    category: 'Entertainment',
+    day_of_month: 1,
+    is_active: true,
+  });
+
+  await removeRecurring(userId, theirs.id); // wrong user — should not delete
+
+  const stillThere = await listRecurring(otherUser.id);
+  assert.ok(stillThere.some((r) => r.id === theirs.id));
+
+  await removeRecurring(otherUser.id, theirs.id); // correct user
+  const gone = await listRecurring(otherUser.id);
+  assert.ok(!gone.some((r) => r.id === theirs.id));
+});

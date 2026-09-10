@@ -5,13 +5,12 @@
 import { randomUUID } from 'crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import { and, desc, eq, gte, lt } from 'drizzle-orm';
 
-import { config, toSGD } from '../config';
+import { toSGD } from '../config';
 import { db } from '../db';
-import { transactions } from '../db/schema';
-import { Category, Currency, Transaction } from '../types';
+import { transactions, recurring_transactions } from '../db/schema';
+import { Category, Currency, Transaction, RecurringTransaction } from '../types';
 import { inferCategory } from './categorizer';
 import { resolveCurrency } from './currency-resolver';
 import {
@@ -21,19 +20,6 @@ import {
   SpendingPeriod,
   SpendingSummary,
 } from './types';
-
-function ensureDataDirectory(): void {
-  const dataDir = path.dirname(config.DATABASE_URL);
-  if (dataDir && dataDir !== '.') {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-}
-
-function getSQLiteDb(): Database.Database {
-  ensureDataDirectory();
-  const sqliteDb = new Database(config.DATABASE_URL);
-  return sqliteDb;
-}
 
 function centsFromAmount(amount: number): number {
   return Math.max(0, Math.round(amount * 100));
@@ -276,111 +262,116 @@ export async function exportCSV(userId: string, year: number): Promise<string> {
   return filePath;
 }
 
-// --- Recurring-transaction functions below are migrated in Task 7; left
-// unchanged (raw SQL, no userId) for now. getSQLiteDb()/ensureDataDirectory()
-// above stay in place until Task 7 removes them along with these. ---
+// --- Recurring-transaction functions ---
 
-export async function createRecurring(data: RecurringInput): Promise<any> {
-  const db2 = getSQLiteDb();
-  const amount = centsFromAmount(data.amount);
-  const category = data.category ?? (await inferCategory({ merchant: data.merchant, amount }));
-  const id = randomUUID();
-  const now = Date.now();
-
-  db2.prepare(
-    `INSERT INTO recurring_transactions (id, amount, currency, merchant, category, day_of_month, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    amount,
-    data.currency ?? 'SGD',
-    data.merchant,
-    category,
-    data.day_of_month,
-    data.is_active === undefined ? 1 : data.is_active ? 1 : 0,
-    now,
-    now,
-  );
-
-  const row = db2.prepare('SELECT * FROM recurring_transactions WHERE id = ?').get(id) as any;
-  db2.close();
+function mapRecurringRow(row: typeof recurring_transactions.$inferSelect): RecurringTransaction {
   return {
-    ...row,
+    id: row.id,
+    amount: row.amount,
+    currency: row.currency as Currency,
+    merchant: row.merchant,
+    category: row.category as Category,
+    day_of_month: row.day_of_month,
     is_active: Boolean(row.is_active),
-    created_at: new Date(Number(row.created_at)),
-    updated_at: new Date(Number(row.updated_at)),
+    created_at: new Date(row.created_at),
+    updated_at: new Date(row.updated_at),
   };
 }
 
-export async function pauseRecurring(id: string): Promise<void> {
-  const db2 = getSQLiteDb();
-  db2.prepare('UPDATE recurring_transactions SET is_active = 0, updated_at = ? WHERE id = ?').run(Date.now(), id);
-  db2.close();
+export async function createRecurring(userId: string, data: RecurringInput): Promise<RecurringTransaction> {
+  const amount = centsFromAmount(data.amount);
+  const category = data.category ?? (await inferCategory({ merchant: data.merchant, amount }));
+  const now = Date.now();
+
+  const [inserted] = await db
+    .insert(recurring_transactions)
+    .values({
+      id: randomUUID(),
+      user_id: userId,
+      amount,
+      currency: data.currency ?? 'SGD',
+      merchant: data.merchant,
+      category,
+      day_of_month: data.day_of_month,
+      is_active: data.is_active === undefined ? 1 : data.is_active ? 1 : 0,
+      created_at: now,
+      updated_at: now,
+    })
+    .returning();
+
+  return mapRecurringRow(inserted);
 }
 
-export async function removeRecurring(id: string): Promise<void> {
-  const db2 = getSQLiteDb();
-  db2.prepare('DELETE FROM recurring_transactions WHERE id = ?').run(id);
-  db2.close();
+export async function pauseRecurring(userId: string, id: string): Promise<void> {
+  await db
+    .update(recurring_transactions)
+    .set({ is_active: 0, updated_at: Date.now() })
+    .where(and(eq(recurring_transactions.id, id), eq(recurring_transactions.user_id, userId)));
 }
 
-export async function listRecurring(): Promise<any[]> {
-  const db2 = getSQLiteDb();
-  const rows = db2.prepare('SELECT * FROM recurring_transactions ORDER BY day_of_month ASC').all() as any[];
-  db2.close();
-  return rows.map((row) => ({
-    ...row,
-    is_active: Boolean(row.is_active),
-    created_at: new Date(Number(row.created_at)),
-    updated_at: new Date(Number(row.updated_at)),
-  }));
+export async function removeRecurring(userId: string, id: string): Promise<void> {
+  await db
+    .delete(recurring_transactions)
+    .where(and(eq(recurring_transactions.id, id), eq(recurring_transactions.user_id, userId)));
 }
 
-export async function fireRecurringForToday(): Promise<Transaction[]> {
-  const db2 = getSQLiteDb();
+export async function listRecurring(userId: string): Promise<RecurringTransaction[]> {
+  const rows = await db
+    .select()
+    .from(recurring_transactions)
+    .where(eq(recurring_transactions.user_id, userId))
+    .orderBy(recurring_transactions.day_of_month);
+  return rows.map(mapRecurringRow);
+}
+
+export async function fireRecurringForToday(userId: string): Promise<Transaction[]> {
   const today = new Date().getDate();
-  const recurringRows = db2
-    .prepare('SELECT * FROM recurring_transactions WHERE is_active = 1 AND day_of_month = ?')
-    .all(today) as any[];
-
-  const created: Transaction[] = [];
-  for (const recurring of recurringRows) {
-    const amountSgd = toSGD(Number(recurring.amount), String(recurring.currency) as Currency);
-    const insertedId = randomUUID();
-    const now = Date.now();
-
-    db2.prepare(
-      `INSERT INTO transactions (id, user_id, amount, currency, amount_sgd, merchant, category, source, card_name, note, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      insertedId,
-      'PLACEHOLDER_UNTIL_TASK_7',
-      Number(recurring.amount),
-      String(recurring.currency),
-      amountSgd,
-      String(recurring.merchant),
-      String(recurring.category),
-      'recurring',
-      'Recurring',
-      `Auto-logged recurring: ${recurring.merchant}`,
-      now,
-      now,
+  const dueRows = await db
+    .select()
+    .from(recurring_transactions)
+    .where(
+      and(
+        eq(recurring_transactions.user_id, userId),
+        eq(recurring_transactions.is_active, 1),
+        eq(recurring_transactions.day_of_month, today),
+      ),
     );
 
-    const insertedRow = db2.prepare('SELECT * FROM transactions WHERE id = ?').get(insertedId) as any;
-    created.push(mapTransactionRow({ ...insertedRow, note: insertedRow.note } as typeof transactions.$inferSelect));
+  const created: Transaction[] = [];
+  for (const recurring of dueRows) {
+    const amountSgd = toSGD(recurring.amount, recurring.currency as Currency);
+    const now = Date.now();
+
+    const [inserted] = await db
+      .insert(transactions)
+      .values({
+        id: randomUUID(),
+        user_id: userId,
+        amount: recurring.amount,
+        currency: recurring.currency,
+        amount_sgd: amountSgd,
+        merchant: recurring.merchant,
+        category: recurring.category,
+        source: 'recurring',
+        card_name: 'Recurring',
+        note: `Auto-logged recurring: ${recurring.merchant}`,
+        created_at: now,
+        updated_at: now,
+      })
+      .returning();
+
+    created.push(mapTransactionRow(inserted));
   }
 
-  db2.close();
   return created;
 }
 
-export async function getRecurringFiredToday(): Promise<Transaction[]> {
+export async function getRecurringFiredToday(userId: string): Promise<Transaction[]> {
   const start = startOfPeriod('today');
   const rows = await db
     .select()
     .from(transactions)
-    .where(and(eq(transactions.source, 'recurring'), gte(transactions.created_at, start)))
+    .where(and(eq(transactions.user_id, userId), eq(transactions.source, 'recurring'), gte(transactions.created_at, start)))
     .orderBy(desc(transactions.created_at));
   return rows.map(mapTransactionRow);
 }
