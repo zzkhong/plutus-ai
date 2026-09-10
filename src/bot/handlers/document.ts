@@ -8,14 +8,14 @@ import { replaceHoldingsForBroker } from '../../portfolio/service';
 import { getPortfolioSummary } from '../../portfolio';
 import { formatCurrency } from '../../config';
 
-export async function handleDocumentMessage(fileBuffer: Buffer, mimeType: string): Promise<string> {
+export async function handleDocumentMessage(userId: string, fileBuffer: Buffer, mimeType: string): Promise<string> {
   if (mimeType !== 'application/pdf') {
     return "I can only read PDF statements right now — please upload your IBKR or Moomoo statement as a PDF.";
   }
 
   let parsed;
   try {
-    parsed = await parseStatement(fileBuffer);
+    parsed = await parseStatement(userId, fileBuffer);
   } catch (error) {
     if (error instanceof StatementParseError) {
       logger.warn('Statement parse failed', { message: error.message });
@@ -24,8 +24,8 @@ export async function handleDocumentMessage(fileBuffer: Buffer, mimeType: string
     throw error;
   }
 
-  const updated = await replaceHoldingsForBroker(parsed.broker, parsed.holdings);
-  const summary = await getPortfolioSummary();
+  const updated = await replaceHoldingsForBroker(userId, parsed.broker, parsed.holdings);
+  const summary = await getPortfolioSummary(userId);
 
   return `Updated ${parsed.broker.toUpperCase()} holdings — ${updated.length} position(s). New net worth: ${formatCurrency(summary.net_worth_sgd, 'SGD')}.`;
 }

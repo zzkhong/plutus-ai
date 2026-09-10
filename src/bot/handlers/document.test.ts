@@ -10,9 +10,17 @@ if (fs.existsSync(testDbPath)) {
   fs.rmSync(testDbPath, { force: true });
 }
 
+let userId: string;
+
 before(async () => {
   const { runMigrations } = await import('../../db/migrate');
   runMigrations();
+  const { createUser, setProvider, completeSetup } = await import('../../users/service');
+  const { encrypt } = await import('../../users/crypto');
+  const user = await createUser('test-document-handler-chat');
+  await setProvider(user.id, 'gemini');
+  await completeSetup(user.id, encrypt('fake-key-for-tests'), true);
+  userId = user.id;
 });
 
 test('handleDocumentMessage rejects a non-PDF file without calling Gemini', async () => {
@@ -25,7 +33,7 @@ test('handleDocumentMessage rejects a non-PDF file without calling Gemini', asyn
 
   try {
     const { handleDocumentMessage } = await import('./document');
-    const reply = await handleDocumentMessage(Buffer.from('not a pdf'), 'image/png');
+    const reply = await handleDocumentMessage(userId, Buffer.from('not a pdf'), 'image/png');
 
     assert.match(reply, /PDF/i);
     assert.equal(fetchCalled, false);
@@ -42,7 +50,7 @@ test('handleDocumentMessage returns a friendly message when statement parsing fa
 
   try {
     const { handleDocumentMessage } = await import('./document');
-    const reply = await handleDocumentMessage(Buffer.from('%PDF-1.4 fake'), 'application/pdf');
+    const reply = await handleDocumentMessage(userId, Buffer.from('%PDF-1.4 fake'), 'application/pdf');
 
     assert.match(reply, /couldn't read/i);
   } finally {
