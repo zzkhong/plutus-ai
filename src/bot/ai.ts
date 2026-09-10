@@ -119,6 +119,7 @@ export async function classifyUserMessage(userId: string, rawText: string): Prom
 }
 
 export async function buildAssistantReply(
+  userId: string,
   result: IntentAnalysis,
   source: ExpenseSource = 'text',
 ): Promise<string> {
@@ -141,7 +142,7 @@ export async function buildAssistantReply(
         ? (extracted.currency as Currency)
         : undefined;
 
-      const transaction = await logExpense({
+      const transaction = await logExpense(userId, {
         amount,
         currency,
         merchant: extracted.merchant,
@@ -162,7 +163,7 @@ export async function buildAssistantReply(
       const isRemoval = /remove|delete|cancel/i.test(extracted.action ?? rawText);
 
       if (isRemoval) {
-        await removeBudget(category);
+        await removeBudget(userId, category);
         return `Done — removed the ${category} budget.`;
       }
 
@@ -171,7 +172,7 @@ export async function buildAssistantReply(
         return `What amount should the ${category} budget be? Try "Set food budget to $800/month".`;
       }
 
-      const budget = await setBudget(category, amount);
+      const budget = await setBudget(userId, category, amount);
       return `Got it — ${category} budget set to S$${(budget.amount_sgd / 100).toFixed(2)}/month.`;
     }
     case 'correction': {
@@ -193,7 +194,7 @@ export async function buildAssistantReply(
         value = extracted.category;
       }
 
-      const corrected = await correctLastTransaction(field, value);
+      const corrected = await correctLastTransaction(userId, field, value);
 
       if (!corrected) {
         return `I couldn't find a recent transaction to correct. Try logging an expense first!`;
@@ -211,14 +212,14 @@ export async function buildAssistantReply(
       const isRemoval = /remove|delete|cancel|stop/i.test(extracted.action ?? rawText);
 
       if (isRemoval) {
-        const all = await listRecurring();
+        const all = await listRecurring(userId);
         const match = all.find((r) => r.merchant.toLowerCase() === extracted.merchant!.toLowerCase());
 
         if (!match) {
           return `I couldn't find a recurring entry for "${extracted.merchant}".`;
         }
 
-        await removeRecurring(match.id);
+        await removeRecurring(userId, match.id);
         return `Done — removed the recurring ${match.merchant} charge.`;
       }
 
@@ -236,7 +237,7 @@ export async function buildAssistantReply(
         ? (extracted.currency as Currency)
         : undefined;
 
-      const recurring = await createRecurring({
+      const recurring = await createRecurring(userId, {
         amount,
         currency,
         merchant: extracted.merchant,
@@ -256,7 +257,7 @@ export async function buildAssistantReply(
       const isRemoval = /remove|delete/i.test(extracted.action ?? rawText);
 
       if (isRemoval) {
-        await removeHolding(symbol);
+        await removeHolding(userId, symbol);
         return `Done — removed ${symbol} from your holdings.`;
       }
 
@@ -272,7 +273,7 @@ export async function buildAssistantReply(
         ? (extracted.currency as Currency)
         : 'USD';
 
-      const holding = await addHolding({
+      const holding = await addHolding(userId, {
         symbol,
         name: symbol,
         quantity,
@@ -291,7 +292,7 @@ export async function buildAssistantReply(
         ? (extracted.period as SpendingPeriod)
         : 'month';
 
-      const summary = await getSpendingSummary(period);
+      const summary = await getSpendingSummary(userId, period);
       const label = period === 'today' ? "Today's spend" : period === 'week' ? "This week's spend" : "This month's spend";
 
       return formatSpendingSummary(label, summary);
