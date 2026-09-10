@@ -1,6 +1,43 @@
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGeminiReceiptResponse, ExtractionError } from './extraction';
+import fs from 'node:fs';
+import path from 'node:path';
+
+process.env.DATABASE_URL = './data/test-split-extraction.db';
+
+const testDbPath = path.resolve('./data/test-split-extraction.db');
+if (fs.existsSync(testDbPath)) {
+  fs.rmSync(testDbPath, { force: true });
+}
+
+// extraction.ts now imports ../users/service -> ../db (client.ts), whose
+// module-level `export const db = getDb()` eagerly opens/migrates a
+// connection using config.DATABASE_URL at *import* time. tsx/esbuild hoists
+// static imports above all other top-level code regardless of source
+// position, so a static `import ... from './extraction'` here — even placed
+// after the process.env.DATABASE_URL assignment above — would still resolve
+// before that assignment runs and silently connect to the real dev
+// ./data/pluto.db instead of this test's db. Importing dynamically inside
+// before() (which runs after the assignment) avoids that.
+type ExtractionModule = typeof import('./extraction');
+let parseGeminiReceiptResponse: ExtractionModule['parseGeminiReceiptResponse'];
+let ExtractionError: ExtractionModule['ExtractionError'];
+let userId: string;
+
+before(async () => {
+  const { runMigrations } = await import('../db/migrate');
+  runMigrations();
+  const { createUser, setProvider, completeSetup } = await import('../users/service');
+  const { encrypt } = await import('../users/crypto');
+  const user = await createUser('test-split-extraction-chat');
+  await setProvider(user.id, 'gemini');
+  await completeSetup(user.id, encrypt('fake-key-for-tests'), true);
+  userId = user.id;
+
+  const extractionModule = await import('./extraction');
+  parseGeminiReceiptResponse = extractionModule.parseGeminiReceiptResponse;
+  ExtractionError = extractionModule.ExtractionError;
+});
 
 test('parseGeminiReceiptResponse maps a valid receipt JSON response', () => {
   const raw = `Here you go:\n{"merchant": "Ya Kun", "items": [{"name": "Kaya Toast Set", "price": 5.8}, {"name": "Iced Milo", "price": 3.2}], "taxAndTip": 0.9, "total": 9.9, "currency": "SGD"}`;
@@ -74,7 +111,7 @@ test('extractReceipt surfaces a Gemini/network failure as ExtractionError, not a
 
   try {
     const { extractReceipt } = await import('./extraction');
-    await assert.rejects(() => extractReceipt(Buffer.from('fake jpeg'), 'image/jpeg'), ExtractionError);
+    await assert.rejects(() => extractReceipt(userId, Buffer.from('fake jpeg'), 'image/jpeg'), ExtractionError);
   } finally {
     global.fetch = originalFetch;
   }

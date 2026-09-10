@@ -1,6 +1,43 @@
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGeminiAssignmentResponse, AssignmentParseError } from './assignment';
+import fs from 'node:fs';
+import path from 'node:path';
+
+process.env.DATABASE_URL = './data/test-split-assignment.db';
+
+const testDbPath = path.resolve('./data/test-split-assignment.db');
+if (fs.existsSync(testDbPath)) {
+  fs.rmSync(testDbPath, { force: true });
+}
+
+// assignment.ts now imports ../users/service -> ../db (client.ts), whose
+// module-level `export const db = getDb()` eagerly opens/migrates a
+// connection using config.DATABASE_URL at *import* time. tsx/esbuild hoists
+// static imports above all other top-level code regardless of source
+// position, so a static top-level `import ... from './assignment'` would
+// still resolve before the process.env.DATABASE_URL assignment above runs
+// and silently connect to the real dev ./data/pluto.db instead of this
+// test's db. Importing dynamically inside before() (which runs after the
+// assignment) avoids that.
+type AssignmentModule = typeof import('./assignment');
+let parseGeminiAssignmentResponse: AssignmentModule['parseGeminiAssignmentResponse'];
+let AssignmentParseError: AssignmentModule['AssignmentParseError'];
+let userId: string;
+
+before(async () => {
+  const { runMigrations } = await import('../db/migrate');
+  runMigrations();
+  const { createUser, setProvider, completeSetup } = await import('../users/service');
+  const { encrypt } = await import('../users/crypto');
+  const user = await createUser('test-split-assignment-chat');
+  await setProvider(user.id, 'gemini');
+  await completeSetup(user.id, encrypt('fake-key-for-tests'), true);
+  userId = user.id;
+
+  const assignmentModule = await import('./assignment');
+  parseGeminiAssignmentResponse = assignmentModule.parseGeminiAssignmentResponse;
+  AssignmentParseError = assignmentModule.AssignmentParseError;
+});
 
 const ITEM_NAMES = ['Burger', 'Salad', 'Fries'];
 
@@ -106,7 +143,7 @@ test('parseSplitInstructions surfaces a Gemini/network failure as AssignmentPars
   try {
     const { parseSplitInstructions } = await import('./assignment');
     await assert.rejects(
-      () => parseSplitInstructions('split between 2', [{ name: 'Burger', price: 10 }]),
+      () => parseSplitInstructions(userId, 'split between 2', [{ name: 'Burger', price: 10 }]),
       AssignmentParseError,
     );
   } finally {
