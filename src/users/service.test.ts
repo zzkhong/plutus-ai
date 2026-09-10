@@ -133,3 +133,14 @@ test('listApproved returns only approved users', async () => {
   assert.ok(approvedList.some((u) => u.telegram_chat_id === 'chat-10-approved'));
   assert.ok(!approvedList.some((u) => u.telegram_chat_id === 'chat-11-onboarding'));
 });
+
+test('restartOnboarding resets status to onboarding and clears the chosen provider', async () => {
+  const { createUser, approve, setProvider, restartOnboarding } = await import('./service');
+  const user = await createUser('chat-restart-onboarding');
+  await setProvider(user.id, 'gemini');
+  await approve(user.id);
+
+  const restarted = await restartOnboarding(user.id);
+  assert.equal(restarted.status, 'onboarding');
+  assert.equal(restarted.llm_provider, null);
+});
