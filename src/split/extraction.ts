@@ -5,8 +5,8 @@
  * src/portfolio/statement-parser.ts.
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { config } from '../config';
+import { getProviderForUser } from '../llm/provider';
+import { findById } from '../users/service';
 import { Currency } from '../types';
 import { ExtractedReceipt, ReceiptItem } from './types';
 
@@ -95,29 +95,26 @@ export function parseGeminiReceiptResponse(rawText: string): ExtractedReceipt {
   };
 }
 
-export async function extractReceipt(photoBuffer: Buffer, mimeType: string): Promise<ExtractedReceipt> {
+export async function extractReceipt(userId: string, photoBuffer: Buffer, mimeType: string): Promise<ExtractedReceipt> {
   try {
-    const genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3.6-flash',
-      systemInstruction: SYSTEM_INSTRUCTION,
-    });
+    const user = await findById(userId);
+    if (!user) {
+      throw new ExtractionError(`No user found with id ${userId}`);
+    }
+    const provider = getProviderForUser(user);
 
     // Vision calls run slower than short text-classification prompts (ai.ts's
     // 15s budget) — 30s gives enough headroom, matching statement-parser.ts.
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Gemini receipt extraction timed out after 30s')), 30000);
-    });
-
-    const result = await Promise.race([
-      model.generateContent([
+    const response = await provider.generateText({
+      systemInstruction: SYSTEM_INSTRUCTION,
+      contents: [
         { inlineData: { mimeType, data: photoBuffer.toString('base64') } },
         { text: 'Extract the receipt as instructed and return only the JSON.' },
-      ]),
-      timeoutPromise,
-    ]);
+      ],
+      timeoutMs: 30000,
+    });
 
-    return parseGeminiReceiptResponse(result.response.text());
+    return parseGeminiReceiptResponse(response);
   } catch (error) {
     if (error instanceof ExtractionError) {
       throw error;

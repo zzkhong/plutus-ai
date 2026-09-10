@@ -29,14 +29,19 @@ export function handleCancelCommand(chatId: number): string {
   return clearSplit(chatId) ? 'Split cancelled.' : 'Nothing to cancel.';
 }
 
-export async function handleSplitPhoto(chatId: number, photoBuffer: Buffer, mimeType: string): Promise<string> {
+export async function handleSplitPhoto(
+  chatId: number,
+  userId: string,
+  photoBuffer: Buffer,
+  mimeType: string,
+): Promise<string> {
   const state = getSplitState(chatId);
   if (!state || state.stage !== 'awaiting_photo') {
     return 'Got a photo — if you want to split a bill, run /split first.';
   }
 
   try {
-    const receipt = await extractReceipt(photoBuffer, mimeType);
+    const receipt = await extractReceipt(userId, photoBuffer, mimeType);
     setReceipt(chatId, receipt);
     return `Got it${receipt.merchant ? ` — ${receipt.merchant}` : ''}. Should I split it evenly, or tell me who had what?`;
   } catch (error) {
@@ -48,7 +53,7 @@ export async function handleSplitPhoto(chatId: number, photoBuffer: Buffer, mime
   }
 }
 
-export async function handleSplitTextMessage(chatId: number, message: string): Promise<string> {
+export async function handleSplitTextMessage(chatId: number, userId: string, message: string): Promise<string> {
   const state = getSplitState(chatId);
   if (!state) {
     throw new Error(`handleSplitTextMessage called with no active split for chat ${chatId}`);
@@ -65,7 +70,7 @@ export async function handleSplitTextMessage(chatId: number, message: string): P
     const receipt = state.receipt;
 
     try {
-      const instructions = await parseSplitInstructions(message, receipt.items);
+      const instructions = await parseSplitInstructions(userId, message, receipt.items);
       const result =
         instructions.mode === 'even'
           ? calculateEvenSplit(receipt.total, instructions.headcount!)
@@ -116,7 +121,7 @@ export async function handleSplitTextMessage(chatId: number, message: string): P
     }
 
     const merchant = receipt?.merchant ?? 'Split bill';
-    const transaction = await logExpense({
+    const transaction = await logExpense(userId, {
       amount: pendingResult.requesterShare.total,
       currency: receipt?.currency,
       merchant,

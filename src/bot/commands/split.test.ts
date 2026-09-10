@@ -10,9 +10,17 @@ if (fs.existsSync(testDbPath)) {
   fs.rmSync(testDbPath, { force: true });
 }
 
+let userId: string;
+
 before(async () => {
   const { runMigrations } = await import('../../db/migrate');
   runMigrations();
+  const { createUser, setProvider, completeSetup } = await import('../../users/service');
+  const { encrypt } = await import('../../users/crypto');
+  const user = await createUser('test-split-command-chat');
+  await setProvider(user.id, 'gemini');
+  await completeSetup(user.id, encrypt('fake-key-for-tests'), true);
+  userId = user.id;
 });
 
 /**
@@ -78,7 +86,7 @@ test('handleSplitPhoto without an active split hints at /split instead of callin
   }) as typeof fetch;
 
   try {
-    const reply = await handleSplitPhoto(3003, Buffer.from('fake jpeg'), 'image/jpeg');
+    const reply = await handleSplitPhoto(3003, userId, Buffer.from('fake jpeg'), 'image/jpeg');
     assert.match(reply, /split/i);
     assert.equal(fetchCalled, false);
   } finally {
@@ -104,7 +112,7 @@ test('handleSplitPhoto extracts a receipt and moves to awaiting_instructions', a
   const restore = stubGeminiSequence([receiptResponse]);
 
   try {
-    const reply = await handleSplitPhoto(3004, Buffer.from('fake jpeg'), 'image/jpeg');
+    const reply = await handleSplitPhoto(3004, userId, Buffer.from('fake jpeg'), 'image/jpeg');
     assert.match(reply, /Ya Kun/);
     assert.equal(getSplitState(3004)?.stage, 'awaiting_instructions');
   } finally {
@@ -120,7 +128,7 @@ test('handleSplitPhoto keeps the flow at awaiting_photo and replies with an erro
   const restore = stubGeminiSequence(['not valid json']);
 
   try {
-    const reply = await handleSplitPhoto(3005, Buffer.from('fake jpeg'), 'image/jpeg');
+    const reply = await handleSplitPhoto(3005, userId, Buffer.from('fake jpeg'), 'image/jpeg');
     assert.match(reply, /couldn't read/i);
     assert.equal(getSplitState(3005)?.stage, 'awaiting_photo');
   } finally {
@@ -133,7 +141,7 @@ test('handleSplitTextMessage while awaiting_photo replies helpfully and leaves t
   const { getSplitState } = await import('../../split/state');
 
   handleSplitCommand(3009);
-  const reply = await handleSplitTextMessage(3009, 'ok');
+  const reply = await handleSplitTextMessage(3009, userId, 'ok');
 
   assert.match(reply, /photo/i);
   assert.equal(getSplitState(3009)?.stage, 'awaiting_photo');
@@ -154,27 +162,27 @@ test('handleSplitTextMessage: even split then Yes logs only the requester share'
   });
 
   let restore = stubGeminiSequence([receiptResponse]);
-  await handleSplitPhoto(3006, Buffer.from('fake jpeg'), 'image/jpeg');
+  await handleSplitPhoto(3006, userId, Buffer.from('fake jpeg'), 'image/jpeg');
   restore();
 
   restore = stubGeminiSequence([EVEN_SPLIT_RESPONSE]);
-  const breakdownReply = await handleSplitTextMessage(3006, 'split between 2');
+  const breakdownReply = await handleSplitTextMessage(3006, userId, 'split between 2');
   restore();
 
   assert.match(breakdownReply, /You: S\$10\.00/);
   assert.match(breakdownReply, /Log your share/i);
   assert.equal(getSplitState(3006)?.stage, 'awaiting_log_confirmation');
 
-  const before = await getSpendingSummary('today');
+  const before = await getSpendingSummary(userId, 'today');
 
   restore = stubGeminiSequence([CATEGORY_RESPONSE]);
-  const logReply = await handleSplitTextMessage(3006, 'yes');
+  const logReply = await handleSplitTextMessage(3006, userId, 'yes');
   restore();
 
   assert.match(logReply, /Logged S\$10\.00/);
   assert.equal(getSplitState(3006), undefined);
 
-  const after = await getSpendingSummary('today');
+  const after = await getSpendingSummary(userId, 'today');
   assert.equal(after.total - before.total, 1000); // 10.00 SGD in cents, only the requester's share
   assert.equal(after.count - before.count, 1);
 });
@@ -194,16 +202,16 @@ test('handleSplitTextMessage: No logs nothing and clears state', async () => {
   });
 
   let restore = stubGeminiSequence([receiptResponse]);
-  await handleSplitPhoto(3007, Buffer.from('fake jpeg'), 'image/jpeg');
+  await handleSplitPhoto(3007, userId, Buffer.from('fake jpeg'), 'image/jpeg');
   restore();
 
   restore = stubGeminiSequence([EVEN_SPLIT_RESPONSE]);
-  await handleSplitTextMessage(3007, 'split between 2');
+  await handleSplitTextMessage(3007, userId, 'split between 2');
   restore();
 
-  const before = await getSpendingSummary('today');
-  const reply = await handleSplitTextMessage(3007, 'no');
-  const after = await getSpendingSummary('today');
+  const before = await getSpendingSummary(userId, 'today');
+  const reply = await handleSplitTextMessage(3007, userId, 'no');
+  const after = await getSpendingSummary(userId, 'today');
 
   assert.match(reply, /nothing logged/i);
   assert.equal(getSplitState(3007), undefined);
@@ -228,13 +236,9 @@ test('handleSplitTextMessage asks for clarification when the requester share is 
   });
 
   let restore = stubGeminiSequence([receiptResponse]);
-  await handleSplitPhoto(3008, Buffer.from('fake jpeg'), 'image/jpeg');
+  await handleSplitPhoto(3008, userId, Buffer.from('fake jpeg'), 'image/jpeg');
   restore();
 
-  // Itemized, but requesterLabel is null (Gemini couldn't tell who "you" is)
-  // and the only assigned label is "Alice" — calculateItemizedSplit has no
-  // share to match a null/absent requesterLabel against, so requesterShare
-  // comes back null.
   const ambiguousResponse = JSON.stringify({
     mode: 'itemized',
     itemAssignments: [{ itemName: 'Meal', personLabels: ['Alice'] }],
@@ -243,7 +247,7 @@ test('handleSplitTextMessage asks for clarification when the requester share is 
   restore = stubGeminiSequence([ambiguousResponse]);
 
   try {
-    const reply = await handleSplitTextMessage(3008, 'Alice had the meal');
+    const reply = await handleSplitTextMessage(3008, userId, 'Alice had the meal');
     assert.match(reply, /which share is yours/i);
     assert.equal(getSplitState(3008)?.stage, 'awaiting_instructions');
   } finally {

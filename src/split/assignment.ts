@@ -5,8 +5,8 @@
  * other Gemini call (extraction.ts).
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { config } from '../config';
+import { getProviderForUser } from '../llm/provider';
+import { findById } from '../users/service';
 import { ItemAssignment, ReceiptItem, SplitInstructions } from './types';
 
 export class AssignmentParseError extends Error {}
@@ -90,25 +90,26 @@ export function parseGeminiAssignmentResponse(rawText: string, validItemNames: s
   throw new AssignmentParseError('Could not determine an even split or item assignment from that message');
 }
 
-export async function parseSplitInstructions(freeText: string, items: ReceiptItem[]): Promise<SplitInstructions> {
+export async function parseSplitInstructions(
+  userId: string,
+  freeText: string,
+  items: ReceiptItem[],
+): Promise<SplitInstructions> {
   try {
-    const genAI = new GoogleGenerativeAI(config.GOOGLE_API_KEY);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3.6-flash',
+    const user = await findById(userId);
+    if (!user) {
+      throw new AssignmentParseError(`No user found with id ${userId}`);
+    }
+    const provider = getProviderForUser(user);
+
+    const response = await provider.generateText({
       systemInstruction: buildSystemInstruction(items),
+      contents: [{ text: `User's message: "${freeText}"\n\nReturn only the JSON.` }],
+      timeoutMs: 15000,
     });
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Gemini split instruction parsing timed out after 15s')), 15000);
-    });
-
-    const result = await Promise.race([
-      model.generateContent(`User's message: "${freeText}"\n\nReturn only the JSON.`),
-      timeoutPromise,
-    ]);
 
     return parseGeminiAssignmentResponse(
-      result.response.text(),
+      response,
       items.map((item) => item.name),
     );
   } catch (error) {
