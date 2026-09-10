@@ -26,12 +26,12 @@ function mapHoldingRow(row: typeof holdings.$inferSelect): Holding {
 }
 
 /** Manual (crypto/cash) holdings only — never touches broker-sourced rows. */
-export async function addHolding(input: HoldingInput): Promise<Holding> {
+export async function addHolding(userId: string, input: HoldingInput): Promise<Holding> {
   const now = Date.now();
   const existing = await db
     .select()
     .from(holdings)
-    .where(and(eq(holdings.symbol, input.symbol), isNull(holdings.broker)))
+    .where(and(eq(holdings.user_id, userId), eq(holdings.symbol, input.symbol), isNull(holdings.broker)))
     .get();
 
   if (existing) {
@@ -54,6 +54,7 @@ export async function addHolding(input: HoldingInput): Promise<Holding> {
     .insert(holdings)
     .values({
       id: randomUUID(),
+      user_id: userId,
       symbol: input.symbol,
       name: input.name,
       asset_class: input.asset_class,
@@ -70,17 +71,24 @@ export async function addHolding(input: HoldingInput): Promise<Holding> {
 }
 
 /** Manual (crypto/cash) holdings only — never touches broker-sourced rows. */
-export async function removeHolding(symbol: string): Promise<void> {
-  await db.delete(holdings).where(and(eq(holdings.symbol, symbol), isNull(holdings.broker)));
+export async function removeHolding(userId: string, symbol: string): Promise<void> {
+  await db
+    .delete(holdings)
+    .where(and(eq(holdings.user_id, userId), eq(holdings.symbol, symbol), isNull(holdings.broker)));
 }
 
 /**
- * Full snapshot replace, scoped to one broker: wipes all existing holdings
- * for that broker and inserts the statement's ending positions. Never
- * touches the other broker's rows or manually-entered holdings.
- * Transactional: both delete and insert succeed or both roll back.
+ * Full snapshot replace, scoped to one broker AND one user: wipes that
+ * user's existing holdings for that broker and inserts the statement's
+ * ending positions. Never touches another user's rows, the other broker's
+ * rows, or manually-entered holdings. Transactional: both delete and insert
+ * succeed or both roll back.
  */
-export async function replaceHoldingsForBroker(broker: Broker, parsed: ParsedHolding[]): Promise<Holding[]> {
+export async function replaceHoldingsForBroker(
+  userId: string,
+  broker: Broker,
+  parsed: ParsedHolding[],
+): Promise<Holding[]> {
   if (parsed.length === 0) {
     throw new Error(
       'Refusing to replace holdings with an empty list — an empty statement is almost always a parse failure, not an emptied account.',
@@ -89,13 +97,13 @@ export async function replaceHoldingsForBroker(broker: Broker, parsed: ParsedHol
 
   const now = Date.now();
 
-  // Use raw better-sqlite3 transaction for atomicity
   const sqliteDb = getSQLiteDb();
   return sqliteDb.transaction(() => {
-    db.delete(holdings).where(eq(holdings.broker, broker)).run();
+    db.delete(holdings).where(and(eq(holdings.user_id, userId), eq(holdings.broker, broker))).run();
 
     const rows = parsed.map((h) => ({
       id: randomUUID(),
+      user_id: userId,
       symbol: h.symbol,
       name: h.name,
       asset_class: h.asset_class,
@@ -112,7 +120,7 @@ export async function replaceHoldingsForBroker(broker: Broker, parsed: ParsedHol
   })();
 }
 
-export async function listHoldings(): Promise<Holding[]> {
-  const rows = await db.select().from(holdings).orderBy(holdings.symbol);
+export async function listHoldings(userId: string): Promise<Holding[]> {
+  const rows = await db.select().from(holdings).where(eq(holdings.user_id, userId)).orderBy(holdings.symbol);
   return rows.map(mapHoldingRow);
 }

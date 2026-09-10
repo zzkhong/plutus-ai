@@ -10,14 +10,19 @@ if (fs.existsSync(testDbPath)) {
   fs.rmSync(testDbPath, { force: true });
 }
 
+let userId: string;
+
 before(async () => {
   const { runMigrations } = await import('../db/migrate');
   runMigrations();
+  const { createUser } = await import('../users/service');
+  const user = await createUser('test-portfolio-service-chat');
+  userId = user.id;
 });
 
 test('addHolding creates a new manual holding with broker null', async () => {
   const { addHolding } = await import('./service');
-  const holding = await addHolding({
+  const holding = await addHolding(userId, {
     symbol: 'BTC',
     name: 'Bitcoin',
     quantity: 0.5,
@@ -33,10 +38,10 @@ test('addHolding creates a new manual holding with broker null', async () => {
 
 test('addHolding updates the existing manual holding for the same symbol instead of duplicating', async () => {
   const { addHolding, listHoldings } = await import('./service');
-  await addHolding({ symbol: 'ETH', name: 'Ethereum', quantity: 1, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
-  await addHolding({ symbol: 'ETH', name: 'Ethereum', quantity: 2, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
+  await addHolding(userId, { symbol: 'ETH', name: 'Ethereum', quantity: 1, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
+  await addHolding(userId, { symbol: 'ETH', name: 'Ethereum', quantity: 2, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
 
-  const all = await listHoldings();
+  const all = await listHoldings(userId);
   const ethHoldings = all.filter((h) => h.symbol === 'ETH');
 
   assert.equal(ethHoldings.length, 1);
@@ -45,16 +50,16 @@ test('addHolding updates the existing manual holding for the same symbol instead
 
 test('removeHolding deletes only the manual holding with that symbol', async () => {
   const { addHolding, removeHolding, listHoldings } = await import('./service');
-  await addHolding({ symbol: 'DOGE', name: 'Dogecoin', quantity: 100, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
-  await removeHolding('DOGE');
+  await addHolding(userId, { symbol: 'DOGE', name: 'Dogecoin', quantity: 100, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
+  await removeHolding(userId, 'DOGE');
 
-  const all = await listHoldings();
+  const all = await listHoldings(userId);
   assert.ok(!all.some((h) => h.symbol === 'DOGE'));
 });
 
 test('replaceHoldingsForBroker inserts fresh holdings tagged with that broker', async () => {
   const { replaceHoldingsForBroker } = await import('./service');
-  const inserted = await replaceHoldingsForBroker('ibkr', [
+  const inserted = await replaceHoldingsForBroker(userId, 'ibkr', [
     { symbol: 'AAPL', name: 'Apple Inc.', quantity: 10, asset_class: 'stocks_us', currency: 'USD', market: 'NASDAQ' },
   ]);
 
@@ -66,20 +71,19 @@ test('replaceHoldingsForBroker inserts fresh holdings tagged with that broker', 
 test('replaceHoldingsForBroker wipes only the target broker\'s rows, leaving other brokers and manual entries untouched', async () => {
   const { replaceHoldingsForBroker, addHolding, listHoldings } = await import('./service');
 
-  await replaceHoldingsForBroker('ibkr', [
+  await replaceHoldingsForBroker(userId, 'ibkr', [
     { symbol: 'MSFT', name: 'Microsoft', quantity: 5, asset_class: 'stocks_us', currency: 'USD', market: 'NASDAQ' },
   ]);
-  await replaceHoldingsForBroker('moomoo', [
+  await replaceHoldingsForBroker(userId, 'moomoo', [
     { symbol: 'SIA', name: 'Singapore Airlines', quantity: 100, asset_class: 'stocks_sg', currency: 'SGD', market: 'SGX' },
   ]);
-  await addHolding({ symbol: 'BNB', name: 'Binance Coin', quantity: 3, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
+  await addHolding(userId, { symbol: 'BNB', name: 'Binance Coin', quantity: 3, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
 
-  // Re-upload a new IBKR statement with a different position.
-  await replaceHoldingsForBroker('ibkr', [
+  await replaceHoldingsForBroker(userId, 'ibkr', [
     { symbol: 'GOOG', name: 'Alphabet', quantity: 2, asset_class: 'stocks_us', currency: 'USD', market: 'NASDAQ' },
   ]);
 
-  const all = await listHoldings();
+  const all = await listHoldings(userId);
   assert.ok(!all.some((h) => h.symbol === 'MSFT'), 'old IBKR position should be gone');
   assert.ok(all.some((h) => h.symbol === 'GOOG'), 'new IBKR position should be present');
   assert.ok(all.some((h) => h.symbol === 'SIA'), 'moomoo holding should be untouched');
@@ -88,5 +92,23 @@ test('replaceHoldingsForBroker wipes only the target broker\'s rows, leaving oth
 
 test('replaceHoldingsForBroker rejects an empty holdings list', async () => {
   const { replaceHoldingsForBroker } = await import('./service');
-  await assert.rejects(() => replaceHoldingsForBroker('ibkr', []));
+  await assert.rejects(() => replaceHoldingsForBroker(userId, 'ibkr', []));
+});
+
+test('replaceHoldingsForBroker never touches another user\'s holdings for the same broker', async () => {
+  const { createUser } = await import('../users/service');
+  const { replaceHoldingsForBroker, listHoldings } = await import('./service');
+  const otherUser = await createUser('test-portfolio-service-other-chat');
+
+  await replaceHoldingsForBroker(otherUser.id, 'ibkr', [
+    { symbol: 'TSLA', name: 'Tesla', quantity: 1, asset_class: 'stocks_us', currency: 'USD', market: 'NASDAQ' },
+  ]);
+
+  // Replacing the calling user's own ibkr holdings must not wipe the other user's TSLA row.
+  await replaceHoldingsForBroker(userId, 'ibkr', [
+    { symbol: 'GOOG', name: 'Alphabet', quantity: 2, asset_class: 'stocks_us', currency: 'USD', market: 'NASDAQ' },
+  ]);
+
+  const theirs = await listHoldings(otherUser.id);
+  assert.ok(theirs.some((h) => h.symbol === 'TSLA'));
 });
