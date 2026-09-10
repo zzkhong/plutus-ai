@@ -10,9 +10,17 @@ if (fs.existsSync(testDbPath)) {
   fs.rmSync(testDbPath, { force: true });
 }
 
+let userId: string;
+
 before(async () => {
   const { runMigrations } = await import('../../db/migrate');
   runMigrations();
+  const { createUser, setProvider, completeSetup } = await import('../../users/service');
+  const { encrypt } = await import('../../users/crypto');
+  const user = await createUser('test-voice-handler-chat');
+  await setProvider(user.id, 'gemini');
+  await completeSetup(user.id, encrypt('fake-key-for-tests'), true);
+  userId = user.id;
 });
 
 function geminiTextResponse(text: string): Response {
@@ -88,7 +96,7 @@ test('handleVoiceMessage returns a friendly message when transcription fails, wi
 
   try {
     const { handleVoiceMessage } = await import('./voice');
-    const reply = await handleVoiceMessage(1, Buffer.from('fake ogg audio'), 'audio/ogg');
+    const reply = await handleVoiceMessage(1, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
 
     assert.match(reply, /couldn't|trouble|sorry/i);
   } finally {
@@ -102,7 +110,7 @@ test('handleVoiceMessage tells the user when the transcript is empty', async () 
 
   try {
     const { handleVoiceMessage } = await import('./voice');
-    const reply = await handleVoiceMessage(2, Buffer.from('fake ogg audio'), 'audio/ogg');
+    const reply = await handleVoiceMessage(2, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
 
     assert.match(reply, /couldn't make out/i);
   } finally {
@@ -116,13 +124,13 @@ test('handleVoiceMessage transcribes, classifies, and logs a real expense tagged
 
   try {
     const { handleVoiceMessage } = await import('./voice');
-    const reply = await handleVoiceMessage(3, Buffer.from('fake ogg audio'), 'audio/ogg');
+    const reply = await handleVoiceMessage(3, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
 
     assert.match(reply, /Heard: "Spent \$4\.50 at Ya Kun"/);
     assert.match(reply, /Ya Kun/i);
 
     const { getTopExpenses } = await import('../../expense/service');
-    const [logged] = await getTopExpenses('today', 1);
+    const [logged] = await getTopExpenses(userId, 'today', 1);
     assert.ok(logged);
     assert.equal(logged.merchant, 'Ya Kun');
     assert.equal(logged.source, 'voice');
@@ -141,7 +149,7 @@ test('handleVoiceMessage routes the transcript to an active split instead of cla
 
   try {
     const { handleVoiceMessage } = await import('./voice');
-    const reply = await handleVoiceMessage(chatId, Buffer.from('fake ogg audio'), 'audio/ogg');
+    const reply = await handleVoiceMessage(chatId, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
 
     assert.match(reply, /waiting on a photo/i);
   } finally {
