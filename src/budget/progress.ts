@@ -11,12 +11,12 @@ function daysLeftInMonth(now: Date): number {
   return daysInMonth - now.getDate();
 }
 
-export async function getBudgetStatus(): Promise<BudgetStatus[]> {
-  const [budgets, spending] = await Promise.all([listBudgets(), getSpendingByCategory('month')]);
+export async function getBudgetStatus(userId: string): Promise<BudgetStatus[]> {
+  const [budgetsList, spending] = await Promise.all([listBudgets(userId), getSpendingByCategory(userId, 'month')]);
   const spendByCategory = new Map(spending.map((entry) => [entry.category, entry.total]));
   const daysLeft = daysLeftInMonth(new Date());
 
-  return budgets.map((budget) => {
+  return budgetsList.map((budget) => {
     const spentSgd = spendByCategory.get(budget.category) ?? 0;
     const percentage =
       budget.amount_sgd > 0 ? Math.round((spentSgd / budget.amount_sgd) * 1000) / 10 : 0;

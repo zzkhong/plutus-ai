@@ -11,16 +11,22 @@ if (fs.existsSync(testDbPath)) {
   fs.rmSync(testDbPath, { force: true });
 }
 
+let userId: string;
+
 before(async () => {
   const { runMigrations } = await import('../db/migrate');
   runMigrations();
+  const { createUser } = await import('../users/service');
+  const user = await createUser('test-budget-progress-chat');
+  userId = user.id;
 });
 
-async function seedTransaction(category: string, amountSgdCents: number): Promise<void> {
+async function seedTransaction(forUserId: string, category: string, amountSgdCents: number): Promise<void> {
   const { db, transactions } = await import('../db');
   const now = Date.now();
   await db.insert(transactions).values({
     id: randomUUID(),
+    user_id: forUserId,
     amount: amountSgdCents,
     currency: 'SGD',
     amount_sgd: amountSgdCents,
@@ -37,10 +43,10 @@ test('getBudgetStatus computes percentage, remaining, and days left', async () =
   const { setBudget } = await import('./service');
   const { getBudgetStatus } = await import('./progress');
 
-  await setBudget('Food', 100, 'SGD'); // S$100 budget
-  await seedTransaction('Food', 4000); // S$40 spent
+  await setBudget(userId, 'Food', 100, 'SGD'); // S$100 budget
+  await seedTransaction(userId, 'Food', 4000); // S$40 spent
 
-  const statuses = await getBudgetStatus();
+  const statuses = await getBudgetStatus(userId);
   const food = statuses.find((s) => s.category === 'Food');
 
   assert.ok(food);
@@ -58,12 +64,29 @@ test('getBudgetStatus reports zero spend for a category with a budget but no tra
   const { setBudget } = await import('./service');
   const { getBudgetStatus } = await import('./progress');
 
-  await setBudget('Education', 50, 'SGD');
+  await setBudget(userId, 'Education', 50, 'SGD');
 
-  const statuses = await getBudgetStatus();
+  const statuses = await getBudgetStatus(userId);
   const education = statuses.find((s) => s.category === 'Education');
 
   assert.ok(education);
   assert.equal(education!.spent_sgd, 0);
   assert.equal(education!.percentage, 0);
+});
+
+test('getBudgetStatus never mixes another user\'s spending into the calling user\'s status', async () => {
+  const { createUser } = await import('../users/service');
+  const { setBudget } = await import('./service');
+  const { getBudgetStatus } = await import('./progress');
+  const otherUser = await createUser('test-budget-progress-other-chat');
+
+  await setBudget(userId, 'Shopping', 100, 'SGD');
+  await setBudget(otherUser.id, 'Shopping', 100, 'SGD');
+  await seedTransaction(otherUser.id, 'Shopping', 9000); // 90% for the other user only
+
+  const myStatuses = await getBudgetStatus(userId);
+  const myShopping = myStatuses.find((s) => s.category === 'Shopping');
+
+  assert.ok(myShopping);
+  assert.equal(myShopping!.spent_sgd, 0);
 });
