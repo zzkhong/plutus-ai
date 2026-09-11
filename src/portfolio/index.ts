@@ -3,7 +3,7 @@
  */
 
 import { getPrice } from './price-fetcher';
-import { enrichHolding, buildPortfolioSummary, calculateNetWorth, calculateAllocation } from './calculator';
+import { enrichHolding, buildPortfolioSummary } from './calculator';
 import { listHoldings } from './service';
 import { PortfolioSummary } from './types';
 

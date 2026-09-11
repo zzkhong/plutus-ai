@@ -28,7 +28,7 @@ const FETCH_TIMEOUT_MS = 10_000;
  * Exported for direct unit testing (see index.test.ts) — otherwise internal.
  */
 export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-  let timer: NodeJS.Timeout;
+  let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), ms);
   });
