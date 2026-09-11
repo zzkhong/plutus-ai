@@ -1,122 +1,160 @@
 # Setting up Plutus AI
 
-A start-to-finish guide: from a fresh clone to logging your first expense
-in Telegram.
+A start-to-finish guide: from a fresh clone to a bot running for free on
+**Vercel + Turso**, plus how to run it locally for development.
 
 Plutus AI is **multi-user with bring-your-own-key**. The server holds no
-Gemini key of its own — each person registers through the bot with `/setup`
-and pastes their own API key, which is encrypted at rest. The first person
-to register (the `ADMIN_CHAT_ID` chat) becomes the admin and is approved
+Gemini key of its own. Each person registers through the bot with `/setup`
+and pastes their own API key, which is encrypted at rest. The first person to
+register (the `ADMIN_CHAT_ID` chat) becomes the admin and is approved
 automatically; everyone after that needs the admin to approve them.
+
+See [docs/architecture.md](docs/architecture.md) for diagrams of how the
+pieces fit together.
 
 ---
 
+## How it runs
+
+| | Production | Local development |
+|---|---|---|
+| Where | Vercel (free Hobby plan) | Your machine |
+| Database | Turso (free), Tokyo | A SQLite file in `./data/` |
+| Telegram | Telegram pushes updates to a webhook | The process polls Telegram |
+| Daily jobs | Vercel Cron | Built-in scheduler |
+| Command | `git push` | `npm run dev` |
+
+**Use two Telegram bots**, one for production and one for development. A bot
+token can only deliver its messages to one place at a time.
+
 ## 1. Prerequisites
 
-- **Node.js 20 or newer.** `better-sqlite3` ships prebuilt binaries for
-  common Node/OS combinations; if `npm install` tries to compile from
-  source, see [Troubleshooting](#troubleshooting).
-- **A Telegram bot token** — optional, but the bot is the only interface,
-  so you want one. Message [@BotFather](https://t.me/BotFather), send
-  `/newbot`, and follow the prompts.
-- **A Google Gemini API key** — get one free at
-  [aistudio.google.com/apikey](https://aistudio.google.com/apikey). You do
-  **not** put this in `.env`; you hand it to the bot during `/setup`.
-
-## 2. Install
+- **Node.js 22 or newer.**
+- **Accounts** (all free, no credit card needed): [GitHub](https://github.com)
+  with this repo pushed to it, [Vercel](https://vercel.com/signup), and
+  [Turso](https://turso.tech).
+- **Two Telegram bots.** Message [@BotFather](https://t.me/BotFather), send
+  `/newbot` twice, and keep both tokens, e.g. `plutus_bot` for production and
+  `plutus_dev_bot` for development.
+- **Your Telegram chat ID.** Message [@userinfobot](https://t.me/userinfobot);
+  it replies with your numeric ID. This becomes `ADMIN_CHAT_ID`.
+- **A Google Gemini API key**, free from
+  [aistudio.google.com/apikey](https://aistudio.google.com/apikey). This does
+  **not** go in any config; you paste it into the bot during `/setup`.
 
 ```bash
 git clone https://github.com/zzkhong/plutus-ai.git
 cd plutus-ai
 npm install
-cp .env.example .env
 ```
 
-## 3. Configure `.env`
+## 2. Deploy to production (Vercel + Turso)
 
-| Variable | Required | What it does |
-|---|---|---|
-| `ENCRYPTION_KEY` | **Yes** | 64 hex chars (32 bytes). Encrypts each user's stored API key with AES-256-GCM. Startup fails without it. |
-| `ADMIN_CHAT_ID` | **Yes, if `TELEGRAM_BOT_TOKEN` is set** | The Telegram chat that bootstraps as admin. Without it nobody — including you — could ever be approved, so startup refuses. |
-| `TELEGRAM_BOT_TOKEN` | No | Without it the bot doesn't start, but the webhook server and the schedulers still run. |
-| `DATABASE_URL` | No | Defaults to `./data/pluto.db`, created on first run. |
-| `TZ` | Recommended | Set `Asia/Singapore` so "today" boundaries and the 10pm digest line up. |
-| `PORT` | No | Webhook server port, defaults to `3000`. |
-| `LOG_LEVEL` | No | `debug` \| `info` \| `warn` \| `error`, defaults to `info`. |
+### 2.1 Create the Turso database
 
-### Generate your `ENCRYPTION_KEY`
+1. Sign in at [app.turso.tech](https://app.turso.tech) and create a database,
+   e.g. `plutus`.
+2. Choose the **AWS Tokyo (`aws-ap-northeast-1`)** location. Turso has no
+   Singapore location. Tokyo is the closest, and step 2.3 runs Vercel there too
+   so the two sit next to each other.
+3. Copy the database URL. It looks like
+   `libsql://plutus-<your-org>.aws-ap-northeast-1.turso.io`.
+4. Create a token for the database with read and write access and no expiry.
+
+Or with the [Turso CLI](https://docs.turso.tech/cli/introduction), once the
+database exists:
+
+```bash
+turso db show plutus --url
+turso db tokens create plutus
+```
+
+You don't create any tables yourself. The first deploy does that.
+
+### 2.2 Generate three secrets
+
+Run this three times and label the outputs:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-Paste the output into `.env` as `ENCRYPTION_KEY=...`.
+| Name | Used for |
+|---|---|
+| `ENCRYPTION_KEY` | Encrypting users' API keys in the database |
+| `TELEGRAM_WEBHOOK_SECRET` | Proving webhook requests really come from Telegram |
+| `CRON_SECRET` | Proving the daily-job requests really come from Vercel Cron |
 
-> **Keep this key.** Changing it makes every stored API key undecryptable
-> and every user has to re-run `/setup`. Back it up alongside your database.
+> **Keep `ENCRYPTION_KEY` safe.** If it changes, every stored API key becomes
+> unreadable and everyone has to run `/setup` again. Store all three in a
+> password manager.
 
-### Find your `ADMIN_CHAT_ID`
+### 2.3 Create the Vercel project
 
-Message [@userinfobot](https://t.me/userinfobot) on Telegram — it replies
-with your numeric ID. Alternatively, start a chat with your own bot, send
-it any message, and read `chat.id` from
-`https://api.telegram.org/bot<TOKEN>/getUpdates`.
+1. In Vercel: **Add New → Project**, and import your `plutus-ai` GitHub repo.
+2. Leave the framework and build settings as detected. Vercel recognises the
+   Hono app in `src/app.ts`, and [`vercel.json`](vercel.json) supplies the
+   build command, the Tokyo region (`hnd1`) and the two daily jobs.
+3. Under **Environment Variables**, add these for the **Production**
+   environment only:
 
-A filled-in `.env` looks like:
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | The Turso URL from 2.1 (`libsql://…`) |
+| `DATABASE_AUTH_TOKEN` | The Turso token from 2.1 |
+| `ENCRYPTION_KEY` | From 2.2 |
+| `TELEGRAM_BOT_TOKEN` | Your **production** bot's token |
+| `ADMIN_CHAT_ID` | Your chat ID |
+| `TELEGRAM_WEBHOOK_SECRET` | From 2.2 |
+| `CRON_SECRET` | From 2.2 |
+| `APP_TIMEZONE` | Optional, defaults to `Asia/Singapore` |
 
-```ini
-NODE_ENV=development
-TZ=Asia/Singapore
-DATABASE_URL=./data/pluto.db
-TELEGRAM_BOT_TOKEN=8123456789:AAH...your-token...
-ADMIN_CHAT_ID=123456789
-ENCRYPTION_KEY=3f8a...64-hex-chars...b1c2
-LOG_LEVEL=info
-PORT=3000
-```
+Leave Preview unticked. Builds for other branches then skip database
+migrations, so an unfinished branch can never change your production data.
 
-> **Upgrading from an older checkout?** `GOOGLE_API_KEY`,
-> `WEBHOOK_API_KEY`, and `TELEGRAM_AUTHORIZED_CHAT_ID` are no longer used
-> and are ignored if present — keys are per-user now. Delete them and add
-> `ADMIN_CHAT_ID`.
+4. Click **Deploy**. The build type-checks the code, then creates the tables
+   in Turso. When it finishes, open **Project → Domains** and note the
+   production domain, e.g. `plutus-ai.vercel.app`.
 
-## 4. Run it
-
-```bash
-npm run dev
-```
-
-The database and all tables are created automatically on first run — no
-separate migration step. You should see:
-
-```
-[INFO] Database initialized successfully
-[INFO] Telegram bot core initialized
-[INFO] Recurring transactions scheduler started (runs daily at 00:00)
-[INFO] Daily digest scheduler started (runs daily at 22:00 Asia/Singapore)
-[INFO] Webhook server listening on port 3000
-```
-
-For production:
+Check that it's up:
 
 ```bash
-npm run build     # tsc -> dist/, and copies db migrations into dist/
-npm run start     # node dist/index.js
+curl https://plutus-ai.vercel.app/api/health
+# {"status":"ok"}
 ```
 
-## 5. Register yourself in the bot
+> Use the production domain, not a per-deployment URL like
+> `plutus-ai-a1b2c3.vercel.app`. By default those sit behind Vercel's login,
+> so Telegram would get a 401.
 
-Open Telegram, find your bot, and:
+### 2.4 Point Telegram at the deployment
+
+On your own machine, with your **production** bot token and the same webhook
+secret you gave Vercel:
+
+```bash
+TELEGRAM_BOT_TOKEN=<production token> TELEGRAM_WEBHOOK_SECRET=<secret from 2.2> \
+  npm run telegram:webhook -- set https://plutus-ai.vercel.app
+```
+
+(On Windows PowerShell, set those with `$env:TELEGRAM_BOT_TOKEN="…"` on the
+lines before instead.)
+
+You should see `Webhook set: https://plutus-ai.vercel.app/api/telegram`.
+`npm run telegram:webhook -- info` shows the current registration and, if
+deliveries are failing, Telegram's `last_error_message`.
+
+### 2.5 Register yourself
+
+In Telegram, open your **production** bot and:
 
 1. Send **`/setup`**.
-2. The bot asks which provider — reply **`gemini`** (the only one supported
-   today).
-3. Paste your **Gemini API key**. The bot validates it against the live API,
-   then deletes your message so the key doesn't sit in chat history.
-4. Because you're messaging from `ADMIN_CHAT_ID`, you're auto-approved:
-   *"You're auto-approved as the admin."*
+2. Reply **`gemini`**, the only provider supported today.
+3. Paste your **Gemini API key**. The bot checks it against the live API, then
+   deletes your message so the key doesn't stay in chat history.
+4. Because you're `ADMIN_CHAT_ID`, you're approved automatically.
 
-Now try it:
+Then try it:
 
 ```
 /help
@@ -126,40 +164,131 @@ Set food budget to $500/month
 /budget
 ```
 
-If the key is ever rejected or you want to rotate it, just run `/setup`
-again — an already-approved user keeps their approval.
+That's it, you're live. From now on, deploying is just `git push` to `main`.
 
-## 6. Adding other people (optional)
+## 3. Local development
 
-1. They message your bot and run `/setup`, picking `gemini` and pasting
-   **their own** API key.
-2. They land in `pending_approval`, and you (the admin) get a message:
-   *"New signup pending approval: chat_id 987654321."*
-3. You reply **`/approve 987654321`** (or `/reject 987654321`). They're
-   notified either way.
-
-Until approved, a user can only reach `/setup` and `/help`. Every user's
-transactions, budgets, and holdings are scoped to them — nobody can see,
-undo, or export anyone else's data.
-
-## 7. Apple Pay auto-logging (optional)
-
-Each approved user has their **own** webhook key — there is no shared
-secret. Get yours from the bot with **`/webhookkey`**, then follow
-[docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md) to
-wire up the Shortcuts automation and a Cloudflare Tunnel.
-
-You can sanity-check the endpoint without an iPhone:
+The standalone process runs everything on your machine against a SQLite file.
+It uses your **development** bot, so it never touches production.
 
 ```bash
-curl -X POST http://localhost:3000/api/apple-pay \
+cp .env.example .env
+```
+
+Fill in `.env`:
+
+```ini
+ENCRYPTION_KEY=<any 64-hex value; a different one from production is fine>
+DATABASE_URL=file:./data/pluto.db
+TELEGRAM_BOT_TOKEN=<your DEVELOPMENT bot token>
+ADMIN_CHAT_ID=<your chat ID>
+APP_TIMEZONE=Asia/Singapore
+```
+
+Leave `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET` and `DATABASE_AUTH_TOKEN` empty;
+they're only used on Vercel. Then:
+
+```bash
+npm run dev
+```
+
+The database file and tables are created on first run. You should see:
+
+```
+[INFO] Database ready
+[INFO] Recurring transactions scheduler started (runs daily at 00:00 Asia/Singapore)
+[INFO] Daily digest scheduler started (runs daily at 22:00 Asia/Singapore)
+[INFO] HTTP server listening on port 3000
+[INFO] Telegram bot started (long polling)
+```
+
+Message your development bot `/setup` as in step 2.5.
+
+> **If it stops with "This bot token has a webhook registered"**, you've put
+> the production token in `.env`. Starting would delete production's webhook
+> and cut it off from Telegram, so it refuses. Use the development token.
+
+Other commands:
+
+```bash
+npm test            # the whole test suite, no network needed
+npm run typecheck
+npm run lint
+npm run build && npm start   # run the compiled standalone process
+```
+
+## 4. Adding other people
+
+1. They message your production bot, run `/setup`, pick `gemini` and paste
+   **their own** Gemini key.
+2. You get *"New signup pending approval: chat_id 987654321."*
+3. Reply **`/approve 987654321`** (or `/reject 987654321`). They're notified
+   either way.
+
+Until approved, a user can only use `/setup` and `/help`. Everyone's
+transactions, budgets and holdings are private to them. Rejecting someone
+deletes all of their data.
+
+## 5. Apple Pay auto-logging (optional)
+
+Each approved user has their own webhook key. Send **`/webhookkey`** to the
+bot to get yours, then follow
+[docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md). On
+Vercel the Shortcut posts straight to
+`https://plutus-ai.vercel.app/api/apple-pay`. There's no tunnel to run.
+
+Test it without an iPhone:
+
+```bash
+curl -X POST https://plutus-ai.vercel.app/api/apple-pay \
   -H "Content-Type: application/json" \
-  -H "x-api-key: <the key /webhookkey gave you>" \
+  -H "x-api-key: <your /webhookkey value>" \
   -d '{"amount": "12.50", "merchant": "McDonalds", "card": "DBS"}'
 ```
 
-That logs a real transaction against your account and sends you a Telegram
-confirmation — `/today` will show it.
+## How the database works
+
+Everything lives in one libSQL (SQLite-compatible) database: **Turso** in
+production, a **local file** in development. Both use the same code and the
+same migrations.
+
+- **Tables are created and upgraded automatically.** Each deploy runs any new
+  migrations from `src/db/migrations/` before the new code serves traffic, and
+  the local process does the same on startup. Each migration runs once,
+  all-or-nothing; a failed one rolls back and stops the deploy.
+- **Deploying never wipes data.** Your data lives in Turso, completely
+  separate from the code Vercel deploys.
+- **All data is per user**, and API keys are encrypted with `ENCRYPTION_KEY`.
+  The database and that key are a pair: back up both.
+
+### Backups
+
+Turso's free plan keeps one day of point-in-time restore. For anything longer,
+take your own dump:
+
+```bash
+turso db shell plutus .dump > plutus-backup-$(date +%F).sql
+```
+
+### Starting fresh
+
+- **Production:** in Turso, destroy the database and create a new one with the
+  same name. Create a new token, update `DATABASE_AUTH_TOKEN` in Vercel, and
+  redeploy. The redeploy recreates the tables. Everyone runs `/setup` again.
+- **Local:** stop `npm run dev`, delete `data/pluto.db`, and start it again.
+
+When you change `src/db/schema.ts`, run `npm run db:generate` and **read the
+SQL it produces** before deploying. A new `NOT NULL` column needs a default or
+it fails on a table that already has rows, and a rename can come out as
+drop-and-recreate, which loses that column's data.
+
+## Free-tier limits
+
+- **Turso free:** 5 GB of storage, 500 million rows read and 10 million rows
+  written per month. A personal bot uses a tiny fraction of that.
+- **Vercel Hobby:** for personal, non-commercial use. Its scheduled jobs run
+  once a day at some point within the scheduled hour, so the 22:00 digest
+  arrives between 22:00 and 22:59.
 
 ## Command reference
 
@@ -171,57 +300,58 @@ confirmation — `/today` will show it.
 | `/portfolio` | Net worth and allocation |
 | `/split` | Split a bill from a receipt photo (`/cancel` aborts) |
 | `/digest` | Preview tonight's digest |
-| `/export` | Export your transactions to CSV |
+| `/export` | Get this year's transactions as a CSV file |
 | `/undo` | Undo your last transaction |
 | `/webhookkey` | Show your iOS Shortcut webhook key |
 | `/approve <chat_id>` / `/reject <chat_id>` | Admin only |
 | `/help` | Command list |
 
 You can also just talk to it: *"Spent $4.50 at Ya Kun"*, *"How much did I
-spend on food?"*, *"Netflix $15.98 every 5th"*, *"I hold 0.5 BTC"*, or send
-a voice note saying any of those.
+spend on food?"*, *"Netflix $15.98 every 5th"*, *"I hold 0.5 BTC"*, or send a
+voice note saying any of those.
 
 ## Troubleshooting
 
-**`Invalid environment configuration` on startup**
-`ENCRYPTION_KEY` is missing or isn't 64 hex characters, or you set
-`TELEGRAM_BOT_TOKEN` without `ADMIN_CHAT_ID`. The error output names the
-offending field.
+**The production bot doesn't reply.**
+Run `npm run telegram:webhook -- info` with the production token. Then:
 
-**The bot replies "Run /setup to get started" to everything**
-Your chat has no user row yet. Run `/setup`. If you expected to be the
-admin, check `ADMIN_CHAT_ID` matches your actual chat ID exactly.
+- If `url` is empty, redo step 2.4.
+- A `last_error_message` like `Wrong response from the webhook: 401` means
+  `TELEGRAM_WEBHOOK_SECRET` differs between Vercel and the value you registered.
+  Make them match and run `set` again.
+- A `503` means `TELEGRAM_WEBHOOK_SECRET` or `TELEGRAM_BOT_TOKEN` isn't set in
+  Vercel. Add it, then redeploy, because environment changes only apply to new
+  deployments.
 
-**"Still waiting on admin approval"**
-You completed `/setup` but aren't approved. The admin needs to
-`/approve <your chat_id>`. If *you* are meant to be the admin, your
-`ADMIN_CHAT_ID` didn't match when you ran `/setup` — fix `.env`, restart,
-and run `/setup` again.
+**The Vercel build fails with `Invalid environment configuration`.**
+A required variable is missing or malformed for Production. The build log names
+it: usually `ENCRYPTION_KEY` (must be 64 hex characters) or
+`DATABASE_AUTH_TOKEN` (required for a `libsql://` URL).
 
-**"That key didn't work — the provider rejected it"**
-The Gemini API rejected the key. Check it at
-[aistudio.google.com/apikey](https://aistudio.google.com/apikey), and note
-the free tier is rate-limited (roughly 20 requests/day), so a heavily used
-key can fail validation.
+**No nightly digest.**
+Check Vercel's **Cron Jobs** tab. A `503` there means `CRON_SECRET` isn't set.
+On Hobby the digest can arrive any time between 22:00 and 22:59.
 
-**401 from the webhook**
-The `x-api-key` header doesn't match any user's key. Re-check with
-`/webhookkey`.
+**"Run /setup to get started" to everything.**
+That chat isn't registered yet. If you expected to be admin, check that
+`ADMIN_CHAT_ID` exactly matches the ID @userinfobot gave you.
 
-**403 from the webhook**
-The key is real but that account isn't approved yet.
+**"Still waiting on admin approval".**
+The admin needs to `/approve <your chat_id>`.
 
-**`npm install` fails compiling `better-sqlite3`**
-You need native build tools — Windows: Visual Studio Build Tools with the
-C++ workload; macOS: Xcode Command Line Tools; Linux: `build-essential`
-and `python3`.
+**"That key didn't work — the provider rejected it".**
+Check the key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+The free tier is rate-limited, so a heavily used key can fail validation.
 
-**Gemini classification suddenly failing for everyone**
-The model id is pinned in [src/llm/gemini.ts](src/llm/gemini.ts). Gemini
-model ids get deprecated; check `GET /v1beta/models` against a working key.
+**Local: `table budgets already exists` on startup.**
+`data/pluto.db` was created by an older version of the app. Delete it.
+
+**Gemini classification suddenly failing for everyone.**
+The model id is pinned in [src/llm/gemini.ts](src/llm/gemini.ts), and Gemini
+model ids get deprecated. Check `GET /v1beta/models` against a working key.
 
 ## Where to go next
 
+- [docs/architecture.md](docs/architecture.md) — diagrams and design decisions
 - [README.md](README.md) — feature overview
-- [CLAUDE.md](CLAUDE.md) — architecture notes for working on the code
-- [docs/tasks/](docs/tasks/) — the module-by-module build plan
+- [CLAUDE.md](CLAUDE.md) — notes for working on the code

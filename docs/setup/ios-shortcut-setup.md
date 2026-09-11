@@ -6,50 +6,46 @@ automatically — no manual entry.
 
 ## 1. Get your webhook key
 
-The webhook is **per-user** — there is no shared secret in `.env`. Every
-approved user gets their own key when they finish `/setup`, and requests
-signed with it log against that user's account.
+The webhook is **per-user** — there is no shared secret. Every approved user
+gets their own key when they finish `/setup`, and requests signed with it log
+against that user's account.
 
 1. Finish onboarding in the bot if you haven't — see
    [SETUP.md](../../SETUP.md).
 2. Send **`/webhookkey`** to the bot. It replies with your key. Treat it
    like a password: anyone holding it can log expenses as you.
-3. Start the app (`npm run dev` or `npm start`). On boot you should see:
-   ```
-   Webhook server listening on port 3000
-   ```
-4. Confirm it's reachable locally:
-   ```
-   curl http://localhost:3000/api/health
-   # {"status":"ok"}
-   ```
 
-## 2. Expose it to the internet with a Cloudflare Tunnel
+## 2. Know your webhook URL
 
-This uses a **quick tunnel** — no Cloudflare account or domain required.
-The tradeoff: the public URL is random and changes every time you restart
-the tunnel, so you'll need to re-paste it into the Shortcut when that
-happens. That's an acceptable tradeoff for a small personal deployment; a
-named tunnel (stable URL, needs a Cloudflare account + domain) is a
-possible future upgrade.
+**On Vercel (production)** the URL is your project's production domain plus
+`/api/apple-pay`, for example:
 
-1. Install `cloudflared`:
-   - macOS: `brew install cloudflared`
-   - Windows: `winget install --id Cloudflare.cloudflared`
-   - Other platforms: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
-2. With the app running locally, start the tunnel (adjust the port if you
-   changed `PORT` in `.env`):
-   ```
-   cloudflared tunnel --url http://localhost:3000
-   ```
-3. `cloudflared` prints a public URL that looks like
-   `https://random-words-here.trycloudflare.com`. That's your webhook base
-   URL. Keep this terminal window open — closing it tears down the tunnel.
-4. Verify from outside your network (e.g. cellular data on your phone):
-   ```
-   https://random-words-here.trycloudflare.com/api/health
-   ```
-   should return `{"status":"ok"}`.
+```
+https://plutus-ai.vercel.app/api/apple-pay
+```
+
+It's public HTTPS and never changes, so there is nothing else to set up. Use
+the production domain from **Project → Domains**, not a per-deployment URL —
+those sit behind Vercel's login by default.
+
+Check it's reachable:
+
+```
+curl https://plutus-ai.vercel.app/api/health
+# {"status":"ok"}
+```
+
+**Running the standalone process instead** (`npm run dev` / `npm start`), the
+webhook listens on `http://localhost:3000`, which your phone can't reach. Expose
+it with a Cloudflare quick tunnel — no account needed:
+
+1. Install `cloudflared` (`brew install cloudflared`, or
+   `winget install --id Cloudflare.cloudflared` on Windows).
+2. With the app running, start `cloudflared tunnel --url http://localhost:3000`.
+3. It prints a URL like `https://random-words-here.trycloudflare.com`; your
+   webhook is that plus `/api/apple-pay`. Keep the terminal open — closing it
+   tears the tunnel down, and a restart gives you a new URL to paste into the
+   Shortcut.
 
 ## 3. Create the iOS Shortcut
 
@@ -65,8 +61,7 @@ Add these actions, in order:
 1. **Get Text from Input** — the automation passes the transaction as
    automation input; this lets later steps reference specific parts of it.
 2. **Get Contents of URL**
-   - URL: `https://random-words-here.trycloudflare.com/api/apple-pay`
-     (your tunnel URL from step 2, plus `/api/apple-pay`)
+   - URL: your webhook URL from step 2
    - Method: `POST`
    - Headers:
      - `Content-Type`: `application/json`
@@ -85,25 +80,15 @@ Save the automation. Make a small Apple Pay purchase to test — you should
 get a Telegram message like `Spent $4.50 at Ya Kun — Food` within a few
 seconds.
 
-## 4. Re-pasting the URL after a restart
-
-Every time you restart `cloudflared`, the `*.trycloudflare.com` URL
-changes. When that happens:
-
-1. Note the new URL printed by `cloudflared tunnel --url ...`.
-2. Open the Shortcut automation → the **Get Contents of URL** action →
-   update the URL field.
-
 ## Troubleshooting
 
 - **No Telegram confirmation, but the shortcut didn't show an error**: the
-  confirmation is sent to the chat that owns the key, and only when the
-  Telegram bot is running (`TELEGRAM_BOT_TOKEN` set). The transaction is
-  logged either way — check `/today` in the bot.
+  transaction is logged either way — check `/today` in the bot. The
+  confirmation goes to the chat that owns the key.
 - **401 from the webhook**: the `x-api-key` header doesn't match any user's
-  key. Re-check with `/webhookkey`.
+  key. Re-check with `/webhookkey`. A 401 *page* (HTML, not JSON) means you
+  used a per-deployment Vercel URL — switch to the production domain.
 - **403 from the webhook**: the key is valid but your account isn't
   approved yet — ask the admin to `/approve` you.
-- **Webhook unreachable from outside**: confirm the `cloudflared` process is
-  still running and the URL in the Shortcut matches what it's currently
-  printing.
+- **Tunnel unreachable (standalone only)**: confirm `cloudflared` is still
+  running and the URL in the Shortcut matches what it's currently printing.
