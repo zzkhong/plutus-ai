@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { enrichHolding, calculateNetWorth, calculateAllocation, buildPortfolioSummary } from './calculator';
 import { Holding, PriceQuote } from './types';
 import { Currency } from '../types';
+import { EXCHANGE_RATES } from '../config/currencies';
 
 function fakeHolding(overrides: Partial<Holding> = {}): Holding {
   return {
@@ -30,9 +31,8 @@ test('enrichHolding values a stock holding in SGD cents using quantity * price, 
 
   const enriched = enrichHolding(holding, quote);
 
-  // USD -> SGD at the static EXCHANGE_RATES rate (USD: 0.75 means 1 SGD = 0.75 USD,
-  // so 1000 USD -> 1000 / 0.75 = 1333.33 SGD -> 133333 cents, rounded).
-  assert.equal(enriched.value_sgd, Math.round((1000 / 0.75) * 100));
+  // USD -> SGD at the static EXCHANGE_RATES rate (units of USD per 1 SGD).
+  assert.equal(enriched.value_sgd, Math.round((1000 / EXCHANGE_RATES.USD) * 100));
   assert.equal(enriched.quote, quote);
 });
 

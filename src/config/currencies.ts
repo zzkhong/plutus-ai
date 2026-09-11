@@ -28,23 +28,25 @@ export const DEFAULT_CARD_CURRENCY_MAP: Record<string, Currency> = {
   'Gemini': 'USD',
 };
 
-// DEPRECATED: Hardcoded exchange rates for backward compatibility only
-// Use getExchangeRates() from ./exchange-rates.ts for live rates
-// Values are in relation to SGD (1 SGD = ? currency)
+// Static exchange rates: how many units of each currency 1 SGD buys. Not
+// fetched live — update by hand when they drift (last set 2026-09-11 from
+// open.er-api.com and CoinGecko). Every entry must run the same direction:
+// MYR was once entered the other way round (0.3), which turned RM 45 into
+// S$150. currencies.test.ts guards against that.
 export const EXCHANGE_RATES: Record<Currency, number> = {
   SGD: 1.0,
-  MYR: 0.3,
-  USD: 0.75,
-  BTC: 0.000015,
-  ETH: 0.00034,
-  BETH: 0.00034,
+  MYR: 3.21,
+  USD: 0.789,
+  BTC: 0.0000102,
+  ETH: 0.000307,
+  BETH: 0.000307, // tracks ETH
 };
 
 /**
  * Convert amount from one currency to another (synchronous, uses static rates)
  * All amounts are in cents
  *
- * NOTE: This uses static fallback rates. For live rates, use convertCurrencyAsync() from ./exchange-rates.ts
+ * Uses the static EXCHANGE_RATES above.
  */
 export function convertCurrency(
   amount: number,
@@ -65,7 +67,7 @@ export function convertCurrency(
 /**
  * Convert any amount to SGD (base currency) using static rates
  *
- * NOTE: This uses static fallback rates. For live rates, consider refactoring to async
+ * Uses the static EXCHANGE_RATES above.
  */
 export function toSGD(amount: number, currency: Currency): number {
   return convertCurrency(amount, currency, 'SGD');
