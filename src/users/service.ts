@@ -5,7 +5,15 @@
 import { randomUUID } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
-import { users } from '../db/schema';
+import {
+  budget_alerts,
+  budgets,
+  holdings,
+  recurring_transactions,
+  split_sessions,
+  transactions,
+  users,
+} from '../db/schema';
 import { LLMProviderName, User, UserStatus } from './types';
 
 function mapUserRow(row: typeof users.$inferSelect): User {
@@ -107,8 +115,23 @@ export async function approve(userId: string): Promise<User> {
   return mapUserRow(updated);
 }
 
+/**
+ * Deletes a user and everything they own. The schema declares ON DELETE
+ * CASCADE, but Turso doesn't reliably enforce foreign keys (see
+ * src/db/client.ts), so the child rows are deleted explicitly — in one batch,
+ * so a failure can't leave a half-deleted account behind.
+ */
 export async function reject(userId: string): Promise<void> {
-  await db.delete(users).where(eq(users.id, userId));
+  const user = await findById(userId);
+  await db.batch([
+    db.delete(budget_alerts).where(eq(budget_alerts.user_id, userId)),
+    db.delete(budgets).where(eq(budgets.user_id, userId)),
+    db.delete(transactions).where(eq(transactions.user_id, userId)),
+    db.delete(recurring_transactions).where(eq(recurring_transactions.user_id, userId)),
+    db.delete(holdings).where(eq(holdings.user_id, userId)),
+    db.delete(split_sessions).where(eq(split_sessions.chat_id, user?.telegram_chat_id ?? '')),
+    db.delete(users).where(eq(users.id, userId)),
+  ]);
 }
 
 export async function findByChatId(telegramChatId: string): Promise<User | null> {

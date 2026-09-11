@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run vercel-build",
+  "regions": ["hnd1"],
+  "crons": [
+    { "path": "/api/cron/recurring", "schedule": "0 16 * * *" },
+    { "path": "/api/cron/digest", "schedule": "0 14 * * *" }
+  ]
+}

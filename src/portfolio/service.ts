@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'crypto';
 import { and, eq, isNull } from 'drizzle-orm';
-import { db, getSQLiteDb } from '../db';
+import { db } from '../db';
 import { holdings } from '../db/schema';
 import { AssetClass, Currency } from '../types';
 import { Broker, Holding, HoldingInput, ParsedHolding } from './types';
@@ -97,27 +97,27 @@ export async function replaceHoldingsForBroker(
 
   const now = Date.now();
 
-  const sqliteDb = getSQLiteDb();
-  return sqliteDb.transaction(() => {
-    db.delete(holdings).where(and(eq(holdings.user_id, userId), eq(holdings.broker, broker))).run();
+  const rows = parsed.map((h) => ({
+    id: randomUUID(),
+    user_id: userId,
+    symbol: h.symbol,
+    name: h.name,
+    asset_class: h.asset_class,
+    quantity: h.quantity,
+    currency: h.currency,
+    market: h.market,
+    broker,
+    created_at: now,
+    updated_at: now,
+  }));
 
-    const rows = parsed.map((h) => ({
-      id: randomUUID(),
-      user_id: userId,
-      symbol: h.symbol,
-      name: h.name,
-      asset_class: h.asset_class,
-      quantity: h.quantity,
-      currency: h.currency,
-      market: h.market,
-      broker,
-      created_at: now,
-      updated_at: now,
-    }));
-
-    const inserted = db.insert(holdings).values(rows).returning().all();
-    return inserted.map(mapHoldingRow);
-  })();
+  // A batch runs as one transaction on both a local file and Turso, so a
+  // failed insert can't leave this broker's holdings deleted and empty.
+  const [, inserted] = await db.batch([
+    db.delete(holdings).where(and(eq(holdings.user_id, userId), eq(holdings.broker, broker))),
+    db.insert(holdings).values(rows).returning(),
+  ]);
+  return inserted.map(mapHoldingRow);
 }
 
 export async function listHoldings(userId: string): Promise<Holding[]> {

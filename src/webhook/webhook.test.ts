@@ -23,7 +23,7 @@ let otherApprovedKey: string;
 before(async () => {
   restoreGeminiStub = stubGeminiCategorization();
   const { runMigrations } = await import('../db/migrate');
-  runMigrations();
+  await runMigrations();
 
   const { createUser, setProvider, completeSetup, approve } = await import('../users/service');
   const { encrypt } = await import('../users/crypto');
@@ -246,27 +246,17 @@ test('POST /api/apple-pay returns 400 on a body that is not valid JSON', async (
 
 test('POST /api/apple-pay returns 500 without crashing when logExpense fails', async () => {
   const { createApplePayHandler } = await import('./routes/apple-pay');
+  const { findById } = await import('../users/service');
+  const user = await findById(approvedUserId);
 
-  // Drives the handler directly with a user id that is not in the users
-  // table, so the insert trips the transactions.user_id foreign key. That is
-  // a real logExpense failure rather than a stubbed one — the point of the
-  // test is that the route turns a thrown error into a 500 instead of
-  // crashing the webhook server.
-  const handler = createApplePayHandler(null);
-  const ghostUser = {
-    id: 'user-id-that-does-not-exist',
-    telegram_chat_id: 'ghost-chat',
-    status: 'approved',
-    is_admin: false,
-    llm_provider: 'gemini',
-    llm_api_key_encrypted: 'encrypted',
-    webhook_api_key: 'ghost-key',
-    created_at: new Date(),
-    updated_at: new Date(),
-  };
+  const handler = createApplePayHandler(null, {
+    logExpense: async () => {
+      throw new Error('simulated persistence failure');
+    },
+  });
 
   const ctx = {
-    get: () => ghostUser,
+    get: () => user,
     req: { json: async () => ({ amount: '4.50', merchant: 'Ya Kun', card: 'DBS' }) },
     json: (body: unknown, status: number) =>
       new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }),
@@ -277,4 +267,203 @@ test('POST /api/apple-pay returns 500 without crashing when logExpense fails', a
   assert.equal(res.status, 500);
   const body = (await res.json()) as any;
   assert.equal(body.status, 'error');
+});
+
+// --- POST /api/telegram ------------------------------------------------------
+
+const TELEGRAM_SECRET = 'tg_secret-for-tests';
+
+function fakeTelegram(options: { failInit?: boolean } = {}) {
+  const handled: any[] = [];
+  const pending: Promise<unknown>[] = [];
+  let inited = false;
+  let initCalls = 0;
+
+  const processor = {
+    isInited: () => inited,
+    init: async () => {
+      initCalls += 1;
+      if (options.failInit) {
+        throw new Error('simulated getMe failure');
+      }
+      inited = true;
+    },
+    handleUpdate: async (update: unknown) => {
+      handled.push(update);
+    },
+  } as any;
+
+  return {
+    processor,
+    handled,
+    pending,
+    waitUntil: (promise: Promise<unknown>) => {
+      pending.push(promise);
+    },
+    initCalls: () => initCalls,
+  };
+}
+
+function telegramRequest(headers: Record<string, string>, body: unknown = { update_id: 1, message: { text: '/help' } }) {
+  return {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  };
+}
+
+test('POST /api/telegram refuses every update when TELEGRAM_WEBHOOK_SECRET is not configured', async () => {
+  const { createWebhookApp } = await import('./index');
+  const telegram = fakeTelegram();
+  const app = createWebhookApp(null, { telegramSecret: undefined, telegram: telegram.processor, waitUntil: telegram.waitUntil });
+
+  const res = await app.request('/api/telegram', telegramRequest({ 'x-telegram-bot-api-secret-token': 'anything' }));
+
+  assert.equal(res.status, 503);
+  assert.equal(telegram.handled.length, 0);
+});
+
+test('POST /api/telegram rejects a missing or wrong secret header, so updates cannot be forged', async () => {
+  const { createWebhookApp } = await import('./index');
+  const telegram = fakeTelegram();
+  const app = createWebhookApp(null, { telegramSecret: TELEGRAM_SECRET, telegram: telegram.processor, waitUntil: telegram.waitUntil });
+
+  const missing = await app.request('/api/telegram', telegramRequest({}));
+  const wrong = await app.request('/api/telegram', telegramRequest({ 'x-telegram-bot-api-secret-token': 'not-the-secret' }));
+
+  assert.equal(missing.status, 401);
+  assert.equal(wrong.status, 401);
+  assert.equal(telegram.handled.length, 0);
+});
+
+test('POST /api/telegram acknowledges immediately and processes the update in the background', async () => {
+  const { createWebhookApp } = await import('./index');
+  const telegram = fakeTelegram();
+  const app = createWebhookApp(null, { telegramSecret: TELEGRAM_SECRET, telegram: telegram.processor, waitUntil: telegram.waitUntil });
+
+  const res = await app.request(
+    '/api/telegram',
+    telegramRequest({ 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET }, { update_id: 42, message: { text: 'hi' } }),
+  );
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true });
+  assert.equal(telegram.pending.length, 1, 'processing should be handed to waitUntil');
+
+  await Promise.all(telegram.pending);
+  assert.equal(telegram.handled.length, 1);
+  assert.equal(telegram.handled[0].update_id, 42);
+});
+
+test('POST /api/telegram initializes the bot once per instance, not once per update', async () => {
+  const { createWebhookApp } = await import('./index');
+  const telegram = fakeTelegram();
+  const app = createWebhookApp(null, { telegramSecret: TELEGRAM_SECRET, telegram: telegram.processor, waitUntil: telegram.waitUntil });
+
+  await app.request('/api/telegram', telegramRequest({ 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET }));
+  await app.request('/api/telegram', telegramRequest({ 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET }));
+  await Promise.all(telegram.pending);
+
+  assert.equal(telegram.initCalls(), 1);
+  assert.equal(telegram.handled.length, 2);
+});
+
+test('POST /api/telegram answers 500 when bot initialization fails, so Telegram retries the update', async () => {
+  const { createWebhookApp } = await import('./index');
+  const telegram = fakeTelegram({ failInit: true });
+  const app = createWebhookApp(null, { telegramSecret: TELEGRAM_SECRET, telegram: telegram.processor, waitUntil: telegram.waitUntil });
+
+  const res = await app.request('/api/telegram', telegramRequest({ 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET }));
+
+  assert.equal(res.status, 500);
+  assert.equal(telegram.handled.length, 0);
+});
+
+test('POST /api/telegram rejects a body that is not JSON', async () => {
+  const { createWebhookApp } = await import('./index');
+  const telegram = fakeTelegram();
+  const app = createWebhookApp(null, { telegramSecret: TELEGRAM_SECRET, telegram: telegram.processor, waitUntil: telegram.waitUntil });
+
+  const res = await app.request('/api/telegram', telegramRequest({ 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET }, 'not json'));
+
+  assert.equal(res.status, 400);
+});
+
+test('POST /api/telegram answers 503 when no Telegram bot is configured', async () => {
+  const { createWebhookApp } = await import('./index');
+  const app = createWebhookApp(null, { telegramSecret: TELEGRAM_SECRET });
+
+  const res = await app.request('/api/telegram', telegramRequest({ 'x-telegram-bot-api-secret-token': TELEGRAM_SECRET }));
+
+  assert.equal(res.status, 503);
+});
+
+// --- GET /api/cron/* ---------------------------------------------------------
+
+const CRON_SECRET = 'cron-secret-for-tests-123';
+
+function fakeJobs(options: { fail?: boolean } = {}) {
+  const runs = { recurring: 0, digest: 0 };
+  return {
+    runs,
+    jobs: {
+      recurring: async () => {
+        runs.recurring += 1;
+        if (options.fail) {
+          throw new Error('simulated job failure');
+        }
+      },
+      digest: async () => {
+        runs.digest += 1;
+      },
+    },
+  };
+}
+
+test('GET /api/cron/* refuses to run anything when CRON_SECRET is not configured', async () => {
+  const { createWebhookApp } = await import('./index');
+  const { runs, jobs } = fakeJobs();
+  const app = createWebhookApp(null, { cronSecret: undefined, jobs });
+
+  const res = await app.request('/api/cron/digest', { headers: { authorization: 'Bearer anything' } });
+
+  assert.equal(res.status, 503);
+  assert.equal(runs.digest, 0);
+});
+
+test('GET /api/cron/* rejects a missing or wrong bearer token', async () => {
+  const { createWebhookApp } = await import('./index');
+  const { runs, jobs } = fakeJobs();
+  const app = createWebhookApp(null, { cronSecret: CRON_SECRET, jobs });
+
+  const missing = await app.request('/api/cron/recurring');
+  const wrong = await app.request('/api/cron/recurring', { headers: { authorization: 'Bearer wrong' } });
+
+  assert.equal(missing.status, 401);
+  assert.equal(wrong.status, 401);
+  assert.equal(runs.recurring, 0);
+});
+
+test('GET /api/cron/recurring and /api/cron/digest each run their own job with the right token', async () => {
+  const { createWebhookApp } = await import('./index');
+  const { runs, jobs } = fakeJobs();
+  const app = createWebhookApp(null, { cronSecret: CRON_SECRET, jobs });
+  const headers = { authorization: `Bearer ${CRON_SECRET}` };
+
+  const recurring = await app.request('/api/cron/recurring', { headers });
+  const digest = await app.request('/api/cron/digest', { headers });
+
+  assert.equal(recurring.status, 200);
+  assert.equal(digest.status, 200);
+  assert.deepEqual(runs, { recurring: 1, digest: 1 });
+});
+
+test('GET /api/cron/* answers 500 when the job throws', async () => {
+  const { createWebhookApp } = await import('./index');
+  const { jobs } = fakeJobs({ fail: true });
+  const app = createWebhookApp(null, { cronSecret: CRON_SECRET, jobs });
+
+  const res = await app.request('/api/cron/recurring', { headers: { authorization: `Bearer ${CRON_SECRET}` } });
+
+  assert.equal(res.status, 500);
 });

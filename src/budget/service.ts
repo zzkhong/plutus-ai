@@ -3,9 +3,9 @@
  */
 
 import { randomUUID } from 'crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
-import { budgets } from '../db/schema';
+import { budget_alerts, budgets } from '../db/schema';
 import { toSGD } from '../config';
 import { Category, Currency } from '../types';
 import { Budget } from './types';
@@ -66,7 +66,13 @@ export async function setBudget(
 }
 
 export async function removeBudget(userId: string, category: Category): Promise<void> {
-  await db.delete(budgets).where(and(eq(budgets.user_id, userId), eq(budgets.category, category)));
+  const matching = and(eq(budgets.user_id, userId), eq(budgets.category, category));
+  // Alert rows are deleted explicitly rather than by ON DELETE CASCADE, which
+  // Turso doesn't reliably enforce (see src/db/client.ts).
+  await db.batch([
+    db.delete(budget_alerts).where(inArray(budget_alerts.budget_id, db.select({ id: budgets.id }).from(budgets).where(matching))),
+    db.delete(budgets).where(matching),
+  ]);
 }
 
 export async function listBudgets(userId: string): Promise<Budget[]> {

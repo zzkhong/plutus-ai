@@ -1,8 +1,18 @@
 /**
- * Telegram bot initialization and command routing
+ * Telegram bot: middleware and handler registration, shared by both runtime
+ * modes.
+ *
+ * createBot() returns a fully wired grammy Bot without starting anything. On
+ * Vercel, the /api/telegram webhook feeds it updates (see
+ * src/webhook/routes/telegram.ts); the standalone process calls
+ * startPolling() instead.
+ *
+ * Registration order matters: grammy runs handlers in the order they are
+ * added, and the message:text handler consumes every text message without
+ * calling next() — so every bot.command(...) must be registered above it.
  */
 
-import { Bot } from 'grammy';
+import { Bot, InputFile } from 'grammy';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { BotContext } from './context';
@@ -26,231 +36,206 @@ import { handleDocumentMessage } from './handlers/document';
 import { handleSplitCommand, handleCancelCommand, handleSplitPhoto, handleSplitTextMessage } from './commands/split';
 import { getSplitState } from '../split/state';
 
-export class PlutoBot {
-  private bot: Bot<BotContext>;
+async function downloadTelegramFile(bot: Bot<BotContext>, fileId: string): Promise<Buffer> {
+  const file = await bot.api.getFile(fileId);
+  const response = await fetch(`https://api.telegram.org/file/bot${bot.token}/${file.file_path}`);
+  if (!response.ok) {
+    throw new Error(`Telegram file download failed with HTTP ${response.status}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
 
-  constructor() {
-    if (!config.TELEGRAM_BOT_TOKEN) {
-      throw new Error('TELEGRAM_BOT_TOKEN is not configured');
+export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN): Bot<BotContext> {
+  if (!token) {
+    throw new Error('TELEGRAM_BOT_TOKEN is not configured');
+  }
+
+  const bot = new Bot<BotContext>(token);
+
+  bot.use(authMiddleware);
+  bot.use(errorHandlerMiddleware);
+
+  bot.command('setup', async (ctx) => {
+    await ctx.reply(await handleSetupCommand(String(ctx.chat.id)));
+  });
+
+  bot.command('approve', async (ctx) => {
+    if (!ctx.user) return;
+    const targetChatId = ctx.match?.toString().trim() ?? '';
+    const result = await handleApproveCommand(ctx.user, targetChatId);
+    await ctx.reply(result.reply);
+    if (result.notifyChatId && result.notifyMessage) {
+      try {
+        await bot.api.sendMessage(result.notifyChatId, result.notifyMessage);
+      } catch (error) {
+        logger.error('Failed to notify user of approval decision', error);
+      }
+    }
+  });
+
+  bot.command('reject', async (ctx) => {
+    if (!ctx.user) return;
+    const targetChatId = ctx.match?.toString().trim() ?? '';
+    const result = await handleRejectCommand(ctx.user, targetChatId);
+    await ctx.reply(result.reply);
+    if (result.notifyChatId && result.notifyMessage) {
+      try {
+        await bot.api.sendMessage(result.notifyChatId, result.notifyMessage);
+      } catch (error) {
+        logger.error('Failed to notify user of rejection decision', error);
+      }
+    }
+  });
+
+  bot.command('portfolio', async (ctx) => {
+    if (!ctx.user) return;
+    await ctx.reply(await handlePortfolioCommand(ctx.user.id));
+  });
+
+  bot.command('today', async (ctx) => {
+    if (!ctx.user) return;
+    await ctx.reply(await handleTodayCommand(ctx.user.id));
+  });
+
+  bot.command('month', async (ctx) => {
+    if (!ctx.user) return;
+    await ctx.reply(await handleMonthCommand(ctx.user.id));
+  });
+
+  bot.command('budget', async (ctx) => {
+    if (!ctx.user) return;
+    await ctx.reply(await handleBudgetCommand(ctx.user.id));
+  });
+
+  bot.command('export', async (ctx) => {
+    if (!ctx.user) return;
+    const csv = await handleExportCommand(ctx.user.id);
+    if (csv.rowCount === 0) {
+      await ctx.reply(`Nothing to export yet — no transactions logged in ${csv.year}.`);
+      return;
+    }
+    await ctx.replyWithDocument(new InputFile(Buffer.from(csv.content, 'utf8'), csv.filename), {
+      caption: `${csv.rowCount} transaction${csv.rowCount === 1 ? '' : 's'} from ${csv.year}.`,
+    });
+  });
+
+  bot.command('undo', async (ctx) => {
+    if (!ctx.user) return;
+    await ctx.reply(await handleUndoCommand(ctx.user.id));
+  });
+
+  bot.command('digest', async (ctx) => {
+    if (!ctx.user) return;
+    await ctx.reply(await handleDigestCommand(ctx.user.id));
+  });
+
+  bot.command('split', async (ctx) => {
+    if (!ctx.user) return;
+    await ctx.reply(await handleSplitCommand(ctx.chat.id));
+  });
+
+  bot.command('cancel', async (ctx) => {
+    await ctx.reply(await handleCancelCommand(ctx.chat.id));
+  });
+
+  bot.command('help', async (ctx) => {
+    await ctx.reply(await handleHelpCommand());
+  });
+
+  bot.command('webhookkey', async (ctx) => {
+    if (!ctx.user) return;
+    await ctx.reply(await handleWebhookKeyCommand(ctx.user));
+  });
+
+  bot.command('start', async (ctx) => {
+    await ctx.reply(formatHelpMessage());
+  });
+
+  bot.on('message:text', async (ctx) => {
+    if (!ctx.user) {
+      return; // authMiddleware already replied for unregistered/pending chats
     }
 
-    this.bot = new Bot<BotContext>(config.TELEGRAM_BOT_TOKEN);
-  }
+    if (ctx.user.status === 'onboarding') {
+      const wasEnteringApiKey = Boolean(ctx.user.llm_provider);
+      const result = await handleSetupTextMessage(ctx.user, ctx.message.text);
+      await ctx.reply(result.reply);
 
-  private async replyWithText(ctx: BotContext, text: string): Promise<void> {
-    await ctx.reply(text);
-  }
+      if (wasEnteringApiKey) {
+        await ctx.deleteMessage().catch(() => {
+          // best-effort — Telegram may refuse if the bot lacks delete rights
+        });
+      }
 
-  public async start(): Promise<void> {
-    logger.info('Starting Telegram bot');
-
-    this.bot.use(async (ctx, next) => {
-      await authMiddleware(ctx, next);
-    });
-
-    this.bot.use(async (ctx, next) => {
-      await errorHandlerMiddleware(ctx, next);
-    });
-
-    this.bot.command('setup', async (ctx) => {
-      const reply = await handleSetupCommand(String(ctx.chat.id));
-      await this.replyWithText(ctx, reply);
-    });
-
-    this.bot.command('approve', async (ctx) => {
-      if (!ctx.user) return;
-      const targetChatId = ctx.match?.toString().trim() ?? '';
-      const result = await handleApproveCommand(ctx.user, targetChatId);
-      await this.replyWithText(ctx, result.reply);
-      if (result.notifyChatId && result.notifyMessage) {
+      if (result.notifyAdminForChatId && config.ADMIN_CHAT_ID) {
         try {
-          await this.bot.api.sendMessage(result.notifyChatId, result.notifyMessage);
+          await bot.api.sendMessage(
+            config.ADMIN_CHAT_ID,
+            `New signup pending approval: chat_id ${result.notifyAdminForChatId}. Use /approve ${result.notifyAdminForChatId} or /reject ${result.notifyAdminForChatId}.`,
+          );
         } catch (error) {
-          logger.error('Failed to notify user of approval decision', error);
+          logger.error('Failed to notify admin of new signup', error);
         }
       }
-    });
+      return;
+    }
 
-    this.bot.command('reject', async (ctx) => {
-      if (!ctx.user) return;
-      const targetChatId = ctx.match?.toString().trim() ?? '';
-      const result = await handleRejectCommand(ctx.user, targetChatId);
-      await this.replyWithText(ctx, result.reply);
-      if (result.notifyChatId && result.notifyMessage) {
-        try {
-          await this.bot.api.sendMessage(result.notifyChatId, result.notifyMessage);
-        } catch (error) {
-          logger.error('Failed to notify user of rejection decision', error);
-        }
-      }
-    });
+    if (await getSplitState(ctx.chat.id)) {
+      await ctx.reply(await handleSplitTextMessage(ctx.chat.id, ctx.user.id, ctx.message.text));
+      return;
+    }
 
-    this.bot.command('portfolio', async (ctx) => {
-      if (!ctx.user) return;
-      const response = await handlePortfolioCommand(ctx.user.id);
-      await this.replyWithText(ctx, response);
-    });
+    await ctx.reply(await handleTextMessage(ctx.user.id, ctx.message.text));
+  });
 
-    this.bot.command('today', async (ctx) => {
-      if (!ctx.user) return;
-      const response = await handleTodayCommand(ctx.user.id);
-      await this.replyWithText(ctx, response);
-    });
+  bot.on('message:voice', async (ctx) => {
+    if (!ctx.user) return;
+    const voice = ctx.message.voice;
+    const buffer = await downloadTelegramFile(bot, voice.file_id);
+    await ctx.reply(await handleVoiceMessage(ctx.chat.id, ctx.user.id, buffer, voice.mime_type ?? 'audio/ogg'));
+  });
 
-    this.bot.command('month', async (ctx) => {
-      if (!ctx.user) return;
-      const response = await handleMonthCommand(ctx.user.id);
-      await this.replyWithText(ctx, response);
-    });
+  bot.on('message:document', async (ctx) => {
+    if (!ctx.user) return;
+    const document = ctx.message.document;
+    const buffer = await downloadTelegramFile(bot, document.file_id);
+    await ctx.reply(await handleDocumentMessage(ctx.user.id, buffer, document.mime_type ?? ''));
+  });
 
-    this.bot.command('budget', async (ctx) => {
-      if (!ctx.user) return;
-      const response = await handleBudgetCommand(ctx.user.id);
-      await this.replyWithText(ctx, response);
-    });
+  bot.on('message:photo', async (ctx) => {
+    if (!ctx.user) return;
+    const photos = ctx.message.photo;
+    if (photos.length === 0) {
+      return;
+    }
+    const largest = photos[photos.length - 1];
+    const buffer = await downloadTelegramFile(bot, largest.file_id);
+    await ctx.reply(await handleSplitPhoto(ctx.chat.id, ctx.user.id, buffer, 'image/jpeg'));
+  });
 
-    this.bot.command('export', async (ctx) => {
-      if (!ctx.user) return;
-      const response = await handleExportCommand(ctx.user.id);
-      await this.replyWithText(ctx, response);
-    });
+  return bot;
+}
 
-    this.bot.command('undo', async (ctx) => {
-      if (!ctx.user) return;
-      const response = await handleUndoCommand(ctx.user.id);
-      await this.replyWithText(ctx, response);
-    });
-
-    this.bot.command('digest', async (ctx) => {
-      if (!ctx.user) return;
-      const response = await handleDigestCommand(ctx.user.id);
-      await this.replyWithText(ctx, response);
-    });
-
-    this.bot.command('split', async (ctx) => {
-      if (!ctx.user) return;
-      const response = handleSplitCommand(ctx.chat.id);
-      await this.replyWithText(ctx, response);
-    });
-
-    this.bot.command('cancel', async (ctx) => {
-      const response = handleCancelCommand(ctx.chat.id);
-      await this.replyWithText(ctx, response);
-    });
-
-    this.bot.command('help', async (ctx) => {
-      const response = await handleHelpCommand();
-      await this.replyWithText(ctx, response);
-    });
-
-    this.bot.command('webhookkey', async (ctx) => {
-      if (!ctx.user) return;
-      const response = await handleWebhookKeyCommand(ctx.user);
-      await this.replyWithText(ctx, response);
-    });
-
-    // Registered before the message:text catch-all below: grammy runs
-    // handlers in registration order, and that handler consumes every text
-    // message (a /start command included) without calling next().
-    this.bot.command('start', async (ctx) => {
-      await this.replyWithText(ctx, formatHelpMessage());
-    });
-
-    this.bot.on('message:text', async (ctx) => {
-      if (!ctx.user) {
-        return; // authMiddleware already replied for unregistered/pending chats
-      }
-
-      if (ctx.user.status === 'onboarding') {
-        const wasEnteringApiKey = Boolean(ctx.user.llm_provider);
-        const result = await handleSetupTextMessage(ctx.user, ctx.message.text);
-        await this.replyWithText(ctx, result.reply);
-
-        if (wasEnteringApiKey) {
-          await ctx.deleteMessage().catch(() => {
-            // best-effort — Telegram may refuse if the bot lacks delete rights
-          });
-        }
-
-        if (result.notifyAdminForChatId && config.ADMIN_CHAT_ID) {
-          try {
-            await this.bot.api.sendMessage(
-              config.ADMIN_CHAT_ID,
-              `New signup pending approval: chat_id ${result.notifyAdminForChatId}. Use /approve ${result.notifyAdminForChatId} or /reject ${result.notifyAdminForChatId}.`,
-            );
-          } catch (error) {
-            logger.error('Failed to notify admin of new signup', error);
-          }
-        }
-        return;
-      }
-
-      if (getSplitState(ctx.chat.id)) {
-        const response = await handleSplitTextMessage(ctx.chat.id, ctx.user.id, ctx.message.text);
-        await this.replyWithText(ctx, response);
-        return;
-      }
-
-      const response = await handleTextMessage(ctx.user.id, ctx.message.text);
-      await this.replyWithText(ctx, response);
-    });
-
-    this.bot.on('message:voice', async (ctx) => {
-      if (!ctx.user) return;
-      const voice = ctx.message.voice;
-      if (!voice) {
-        return;
-      }
-      const file = await ctx.api.getFile(voice.file_id);
-      const fileUrl = `https://api.telegram.org/file/bot${config.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-      const response = await fetch(fileUrl);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const reply = await handleVoiceMessage(ctx.chat.id, ctx.user.id, buffer, voice.mime_type ?? 'audio/ogg');
-      await this.replyWithText(ctx, reply);
-    });
-
-    this.bot.on('message:document', async (ctx) => {
-      if (!ctx.user) return;
-      const document = ctx.message.document;
-      if (!document) {
-        return;
-      }
-      const file = await ctx.api.getFile(document.file_id);
-      const fileUrl = `https://api.telegram.org/file/bot${config.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-      const response = await fetch(fileUrl);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const reply = await handleDocumentMessage(ctx.user.id, buffer, document.mime_type ?? '');
-      await this.replyWithText(ctx, reply);
-    });
-
-    this.bot.on('message:photo', async (ctx) => {
-      if (!ctx.user) return;
-      const photos = ctx.message.photo;
-      if (!photos || photos.length === 0) {
-        return;
-      }
-      const largest = photos[photos.length - 1];
-      const file = await ctx.api.getFile(largest.file_id);
-      const fileUrl = `https://api.telegram.org/file/bot${config.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-      const response = await fetch(fileUrl);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const reply = await handleSplitPhoto(ctx.chat.id, ctx.user.id, buffer, 'image/jpeg');
-      await this.replyWithText(ctx, reply);
-    });
-
-    await this.bot.start({
-      drop_pending_updates: true,
-    });
-
-    logger.info('Telegram bot started successfully');
+/**
+ * Long polling, for the standalone process (local development or a
+ * self-hosted server). grammy's start() deletes any registered webhook
+ * first — pointed at a production bot token, that would silently cut the
+ * Vercel deployment off from Telegram. So this refuses while a webhook is
+ * set.
+ */
+export async function startPolling(bot: Bot<BotContext>): Promise<void> {
+  const webhook = await bot.api.getWebhookInfo();
+  if (webhook.url) {
+    throw new Error(
+      `This bot token has a webhook registered (${webhook.url}), so another deployment is receiving its messages. ` +
+        'Starting long polling would delete that webhook. Use a separate bot token for local development, ' +
+        'or run `npm run telegram:webhook -- delete` first if you mean to take this bot over.',
+    );
   }
 
-  public async stop(): Promise<void> {
-    logger.info('Stopping Telegram bot');
-    await this.bot.stop();
-  }
-
-  public getBot(): Bot<BotContext> {
-    return this.bot;
-  }
+  logger.info('Starting Telegram bot (long polling)');
+  await bot.start({
+    drop_pending_updates: true,
+    onStart: () => logger.info('Telegram bot started (long polling)'),
+  });
 }

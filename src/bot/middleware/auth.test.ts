@@ -12,7 +12,7 @@ if (fs.existsSync(testDbPath)) {
 
 before(async () => {
   const { runMigrations } = await import('../../db/migrate');
-  runMigrations();
+  await runMigrations();
 });
 
 function fakeCtx(chatId: number, text?: string) {

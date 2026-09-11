@@ -14,7 +14,7 @@ let userId: string;
 
 before(async () => {
   const { runMigrations } = await import('../../db/migrate');
-  runMigrations();
+  await runMigrations();
   const { createUser, setProvider, completeSetup } = await import('../../users/service');
   const { encrypt } = await import('../../users/crypto');
   const user = await createUser('test-split-command-chat');
@@ -59,21 +59,21 @@ test('handleSplitCommand starts a split and asks for a photo', async () => {
   const { handleSplitCommand } = await import('./split');
   const { getSplitState } = await import('../../split/state');
 
-  const reply = handleSplitCommand(3001);
+  const reply = await handleSplitCommand(3001);
 
   assert.match(reply, /photo/i);
-  assert.equal(getSplitState(3001)?.stage, 'awaiting_photo');
+  assert.equal((await getSplitState(3001))?.stage, 'awaiting_photo');
 });
 
 test('handleCancelCommand clears an active split and reports nothing to cancel otherwise', async () => {
   const { handleSplitCommand, handleCancelCommand } = await import('./split');
   const { getSplitState } = await import('../../split/state');
 
-  handleSplitCommand(3002);
-  assert.match(handleCancelCommand(3002), /cancelled/i);
-  assert.equal(getSplitState(3002), undefined);
+  await handleSplitCommand(3002);
+  assert.match(await handleCancelCommand(3002), /cancelled/i);
+  assert.equal((await getSplitState(3002)), undefined);
 
-  assert.match(handleCancelCommand(3002), /nothing to cancel/i);
+  assert.match(await handleCancelCommand(3002), /nothing to cancel/i);
 });
 
 test('handleSplitPhoto without an active split hints at /split instead of calling Gemini', async () => {
@@ -98,7 +98,7 @@ test('handleSplitPhoto extracts a receipt and moves to awaiting_instructions', a
   const { handleSplitCommand, handleSplitPhoto } = await import('./split');
   const { getSplitState } = await import('../../split/state');
 
-  handleSplitCommand(3004);
+  await handleSplitCommand(3004);
   const receiptResponse = JSON.stringify({
     merchant: 'Ya Kun',
     items: [
@@ -114,7 +114,7 @@ test('handleSplitPhoto extracts a receipt and moves to awaiting_instructions', a
   try {
     const reply = await handleSplitPhoto(3004, userId, Buffer.from('fake jpeg'), 'image/jpeg');
     assert.match(reply, /Ya Kun/);
-    assert.equal(getSplitState(3004)?.stage, 'awaiting_instructions');
+    assert.equal((await getSplitState(3004))?.stage, 'awaiting_instructions');
   } finally {
     restore();
   }
@@ -124,13 +124,13 @@ test('handleSplitPhoto keeps the flow at awaiting_photo and replies with an erro
   const { handleSplitCommand, handleSplitPhoto } = await import('./split');
   const { getSplitState } = await import('../../split/state');
 
-  handleSplitCommand(3005);
+  await handleSplitCommand(3005);
   const restore = stubGeminiSequence(['not valid json']);
 
   try {
     const reply = await handleSplitPhoto(3005, userId, Buffer.from('fake jpeg'), 'image/jpeg');
     assert.match(reply, /couldn't read/i);
-    assert.equal(getSplitState(3005)?.stage, 'awaiting_photo');
+    assert.equal((await getSplitState(3005))?.stage, 'awaiting_photo');
   } finally {
     restore();
   }
@@ -140,11 +140,11 @@ test('handleSplitTextMessage while awaiting_photo replies helpfully and leaves t
   const { handleSplitCommand, handleSplitTextMessage } = await import('./split');
   const { getSplitState } = await import('../../split/state');
 
-  handleSplitCommand(3009);
+  await handleSplitCommand(3009);
   const reply = await handleSplitTextMessage(3009, userId, 'ok');
 
   assert.match(reply, /photo/i);
-  assert.equal(getSplitState(3009)?.stage, 'awaiting_photo');
+  assert.equal((await getSplitState(3009))?.stage, 'awaiting_photo');
 });
 
 test('handleSplitTextMessage: even split then Yes logs only the requester share', async () => {
@@ -152,7 +152,7 @@ test('handleSplitTextMessage: even split then Yes logs only the requester share'
   const { getSplitState } = await import('../../split/state');
   const { getSpendingSummary } = await import('../../expense');
 
-  handleSplitCommand(3006);
+  await handleSplitCommand(3006);
   const receiptResponse = JSON.stringify({
     merchant: 'Test Cafe',
     items: [{ name: 'Meal', price: 20 }],
@@ -171,7 +171,7 @@ test('handleSplitTextMessage: even split then Yes logs only the requester share'
 
   assert.match(breakdownReply, /You: S\$10\.00/);
   assert.match(breakdownReply, /Log your share/i);
-  assert.equal(getSplitState(3006)?.stage, 'awaiting_log_confirmation');
+  assert.equal((await getSplitState(3006))?.stage, 'awaiting_log_confirmation');
 
   const before = await getSpendingSummary(userId, 'today');
 
@@ -180,7 +180,7 @@ test('handleSplitTextMessage: even split then Yes logs only the requester share'
   restore();
 
   assert.match(logReply, /Logged S\$10\.00/);
-  assert.equal(getSplitState(3006), undefined);
+  assert.equal((await getSplitState(3006)), undefined);
 
   const after = await getSpendingSummary(userId, 'today');
   assert.equal(after.total - before.total, 1000); // 10.00 SGD in cents, only the requester's share
@@ -192,7 +192,7 @@ test('handleSplitTextMessage: No logs nothing and clears state', async () => {
   const { getSplitState } = await import('../../split/state');
   const { getSpendingSummary } = await import('../../expense');
 
-  handleSplitCommand(3007);
+  await handleSplitCommand(3007);
   const receiptResponse = JSON.stringify({
     merchant: 'Test Cafe',
     items: [{ name: 'Meal', price: 20 }],
@@ -214,7 +214,7 @@ test('handleSplitTextMessage: No logs nothing and clears state', async () => {
   const after = await getSpendingSummary(userId, 'today');
 
   assert.match(reply, /nothing logged/i);
-  assert.equal(getSplitState(3007), undefined);
+  assert.equal((await getSplitState(3007)), undefined);
   assert.equal(after.total, before.total);
   assert.equal(after.count, before.count);
 });
@@ -226,7 +226,7 @@ test('handleSplitTextMessage asks for clarification when the requester share is 
   const { handleSplitCommand, handleSplitPhoto, handleSplitTextMessage } = await import('./split');
   const { getSplitState } = await import('../../split/state');
 
-  handleSplitCommand(3008);
+  await handleSplitCommand(3008);
   const receiptResponse = JSON.stringify({
     merchant: 'Test Cafe',
     items: [{ name: 'Meal', price: 20 }],
@@ -249,7 +249,7 @@ test('handleSplitTextMessage asks for clarification when the requester share is 
   try {
     const reply = await handleSplitTextMessage(3008, userId, 'Alice had the meal');
     assert.match(reply, /which share is yours/i);
-    assert.equal(getSplitState(3008)?.stage, 'awaiting_instructions');
+    assert.equal((await getSplitState(3008))?.stage, 'awaiting_instructions');
   } finally {
     restore();
   }

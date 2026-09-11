@@ -59,7 +59,7 @@ export async function handleVoiceMessage(
     return "I couldn't make out anything in that voice note — try again or type it instead.";
   }
 
-  if (getSplitState(chatId)) {
+  if (await getSplitState(chatId)) {
     return handleSplitTextMessage(chatId, userId, transcript);
   }
 

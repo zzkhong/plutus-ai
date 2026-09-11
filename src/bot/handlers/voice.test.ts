@@ -14,7 +14,7 @@ let userId: string;
 
 before(async () => {
   const { runMigrations } = await import('../../db/migrate');
-  runMigrations();
+  await runMigrations();
   const { createUser, setProvider, completeSetup } = await import('../../users/service');
   const { encrypt } = await import('../../users/crypto');
   const user = await createUser('test-voice-handler-chat');

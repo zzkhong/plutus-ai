@@ -41,6 +41,9 @@ export const transactions = sqliteTable('transactions', {
   source: text('source').notNull(),
   card_name: text('card_name').notNull(),
   note: text('note'),
+  // The recurring template that logged this row, if any — the recurring
+  // job's idempotency key, so running it twice in a day can't double-log.
+  recurring_id: text('recurring_id'),
   created_at: integer('created_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
@@ -121,6 +124,17 @@ export const recurring_transactions = sqliteTable('recurring_transactions', {
   created_at: integer('created_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
+  updated_at: integer('updated_at')
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+});
+
+// In-progress /split conversations, one row per chat. Persisted rather than
+// held in memory because on Vercel consecutive messages can reach different
+// function instances. Expiry is enforced on read — see src/split/state.ts.
+export const split_sessions = sqliteTable('split_sessions', {
+  chat_id: text('chat_id').primaryKey(), // Telegram chat id
+  state: text('state').notNull(), // JSON-encoded SplitState
   updated_at: integer('updated_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),

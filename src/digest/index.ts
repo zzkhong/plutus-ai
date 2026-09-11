@@ -4,6 +4,7 @@
 
 import * as cron from 'node-cron';
 import { Bot } from 'grammy';
+import { config } from '../config';
 import { listApproved } from '../users/service';
 import { logger } from '../utils/logger';
 import { collectDigestData } from './aggregator';
@@ -59,10 +60,10 @@ export function startDigestScheduler(bot: Bot | null): void {
         logger.error('Failed to run daily digest', error);
       }
     },
-    { timezone: 'Asia/Singapore' },
+    { timezone: config.APP_TIMEZONE },
   );
 
-  logger.info('Daily digest scheduler started (runs daily at 22:00 Asia/Singapore)');
+  logger.info(`Daily digest scheduler started (runs daily at 22:00 ${config.APP_TIMEZONE})`);
 }
 
 export function stopDigestScheduler(): void {

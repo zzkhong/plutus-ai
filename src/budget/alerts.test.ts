@@ -15,7 +15,7 @@ let userId: string;
 
 before(async () => {
   const { runMigrations } = await import('../db/migrate');
-  runMigrations();
+  await runMigrations();
   const { createUser } = await import('../users/service');
   const user = await createUser('test-budget-alerts-chat');
   userId = user.id;

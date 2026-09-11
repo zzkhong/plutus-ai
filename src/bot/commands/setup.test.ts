@@ -13,7 +13,7 @@ if (fs.existsSync(testDbPath)) {
 
 before(async () => {
   const { runMigrations } = await import('../../db/migrate');
-  runMigrations();
+  await runMigrations();
 });
 
 function geminiRestResponse(text: string): Response {

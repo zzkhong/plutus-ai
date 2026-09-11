@@ -23,7 +23,7 @@ const originalFetch = global.fetch;
 
 before(async () => {
   const { runMigrations } = await import('../db/migrate');
-  runMigrations();
+  await runMigrations();
   const { createUser, setProvider, completeSetup } = await import('../users/service');
   const { encrypt } = await import('../users/crypto');
 

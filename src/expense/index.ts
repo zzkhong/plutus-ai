@@ -21,3 +21,4 @@ export {
   removeRecurring,
   undoLastTransaction,
 } from './service';
+export type { CsvExport } from './service';

@@ -12,7 +12,7 @@ if (fs.existsSync(testDbPath)) {
 
 before(async () => {
   const { runMigrations } = await import('../db/migrate');
-  runMigrations();
+  await runMigrations();
 });
 
 test('createUser creates an onboarding row with no provider or admin flag', async () => {
@@ -104,6 +104,47 @@ test('reject deletes the user row', async () => {
 
   const afterReject = await findByChatId('chat-8');
   assert.equal(afterReject, null);
+});
+
+test('reject also deletes everything the user owns, without relying on foreign keys', async () => {
+  const { createUser, reject } = await import('./service');
+  const { db } = await import('../db');
+  const { transactions, budgets, holdings, recurring_transactions, split_sessions } = await import('../db/schema');
+  const { eq } = await import('drizzle-orm');
+  const { randomUUID } = await import('node:crypto');
+
+  const user = await createUser('chat-reject-owned');
+  const now = Date.now();
+  await db.insert(transactions).values({
+    id: randomUUID(), user_id: user.id, amount: 100, currency: 'SGD', amount_sgd: 100, merchant: 'x',
+    category: 'Food', source: 'text', card_name: 'x', created_at: now, updated_at: now,
+  });
+  await db.insert(budgets).values({
+    id: randomUUID(), user_id: user.id, category: 'Food', amount: 1000, currency: 'SGD', amount_sgd: 1000,
+    period: 'monthly', created_at: now, updated_at: now,
+  });
+  await db.insert(holdings).values({
+    id: randomUUID(), user_id: user.id, symbol: 'BTC', name: 'Bitcoin', asset_class: 'crypto', quantity: 1,
+    currency: 'USD', market: 'crypto', broker: null, created_at: now, updated_at: now,
+  });
+  await db.insert(recurring_transactions).values({
+    id: randomUUID(), user_id: user.id, amount: 100, currency: 'SGD', merchant: 'x', category: 'Bills',
+    day_of_month: 1, created_at: now, updated_at: now,
+  });
+  await db.insert(split_sessions).values({ chat_id: 'chat-reject-owned', state: '{"stage":"awaiting_photo"}', updated_at: now });
+
+  await reject(user.id);
+
+  // Foreign keys are not enforced here (or on Turso), so these only pass
+  // because reject() deletes the children itself.
+  assert.equal((await db.select().from(transactions).where(eq(transactions.user_id, user.id))).length, 0);
+  assert.equal((await db.select().from(budgets).where(eq(budgets.user_id, user.id))).length, 0);
+  assert.equal((await db.select().from(holdings).where(eq(holdings.user_id, user.id))).length, 0);
+  assert.equal(
+    (await db.select().from(recurring_transactions).where(eq(recurring_transactions.user_id, user.id))).length,
+    0,
+  );
+  assert.equal((await db.select().from(split_sessions).where(eq(split_sessions.chat_id, 'chat-reject-owned'))).length, 0);
 });
 
 test('findByWebhookKey returns the matching user', async () => {

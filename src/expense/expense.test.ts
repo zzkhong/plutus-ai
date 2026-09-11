@@ -17,7 +17,7 @@ let userId: string;
 before(async () => {
   restoreGeminiStub = stubGeminiCategorization();
   const { runMigrations } = await import('../db/migrate');
-  runMigrations();
+  await runMigrations();
   const { createUser, setProvider, completeSetup } = await import('../users/service');
   const { encrypt } = await import('../users/crypto');
   const user = await createUser('test-expense-chat');
@@ -112,11 +112,24 @@ test('getSpendingSummary tracks a per-category transaction count', async () => {
   assert.equal(totalFromCounts, after.count);
 });
 
-test('exportCSV writes a per-user file scoped to that user\'s transactions', async () => {
-  const { exportCSV } = await import('./index');
-  const filePath = await exportCSV(userId, new Date().getFullYear());
-  assert.ok(fs.existsSync(filePath));
-  assert.match(filePath, new RegExp(userId));
+test('exportCSV builds the CSV in memory, scoped to the calling user', async () => {
+  const { exportCSV, logExpense } = await import('./index');
+  const { createUser } = await import('../users/service');
+  const year = new Date().getFullYear();
+
+  await logExpense(userId, { amount: 7.25, merchant: 'Export Mine Cafe', source: 'text' });
+  const otherUser = await createUser('test-expense-export-other-chat');
+  await logExpense(otherUser.id, { amount: 3, merchant: 'Export Theirs Cafe', source: 'text' });
+
+  const csv = await exportCSV(userId, year);
+
+  assert.equal(csv.year, year);
+  assert.equal(csv.filename, `plutus-expenses-${year}.csv`);
+  const lines = csv.content.trim().split('\n');
+  assert.match(lines[0], /^id,amount,currency,amount_sgd,merchant/);
+  assert.equal(lines.length - 1, csv.rowCount);
+  assert.match(csv.content, /Export Mine Cafe/);
+  assert.doesNotMatch(csv.content, /Export Theirs Cafe/);
 });
 
 test('recurring transactions can be fired for today', async () => {
@@ -132,6 +145,29 @@ test('recurring transactions can be fired for today', async () => {
 
   const fired = await fireRecurringForToday(userId);
   assert.ok(fired.some((item) => item.merchant === recurring.merchant));
+});
+
+test('fireRecurringForToday is idempotent within a day — running it again logs nothing new', async () => {
+  const { createRecurring, fireRecurringForToday, getRecurringFiredToday } = await import('./index');
+  await createRecurring(userId, {
+    amount: 1200,
+    currency: 'SGD',
+    merchant: 'Idempotent Gym',
+    category: 'Health',
+    day_of_month: new Date().getDate(),
+    is_active: true,
+  });
+
+  const first = await fireRecurringForToday(userId);
+  assert.ok(first.some((t) => t.merchant === 'Idempotent Gym'));
+
+  // The standalone process runs the job at startup and at midnight, and a
+  // cron call can be delivered twice — neither may double-log the charge.
+  const second = await fireRecurringForToday(userId);
+  assert.ok(!second.some((t) => t.merchant === 'Idempotent Gym'));
+
+  const firedToday = await getRecurringFiredToday(userId);
+  assert.equal(firedToday.filter((t) => t.merchant === 'Idempotent Gym').length, 1);
 });
 
 test('getRecurringFiredToday reports already-fired recurring transactions without inserting new ones', async () => {

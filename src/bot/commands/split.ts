@@ -20,13 +20,13 @@ function formatBreakdown(result: SplitResult, currency: Currency): string {
     .join('\n');
 }
 
-export function handleSplitCommand(chatId: number): string {
-  startSplit(chatId);
+export async function handleSplitCommand(chatId: number): Promise<string> {
+  await startSplit(chatId);
   return 'Send me a photo of the receipt to split, or /cancel to stop.';
 }
 
-export function handleCancelCommand(chatId: number): string {
-  return clearSplit(chatId) ? 'Split cancelled.' : 'Nothing to cancel.';
+export async function handleCancelCommand(chatId: number): Promise<string> {
+  return (await clearSplit(chatId)) ? 'Split cancelled.' : 'Nothing to cancel.';
 }
 
 export async function handleSplitPhoto(
@@ -35,14 +35,14 @@ export async function handleSplitPhoto(
   photoBuffer: Buffer,
   mimeType: string,
 ): Promise<string> {
-  const state = getSplitState(chatId);
+  const state = await getSplitState(chatId);
   if (!state || state.stage !== 'awaiting_photo') {
     return 'Got a photo — if you want to split a bill, run /split first.';
   }
 
   try {
     const receipt = await extractReceipt(userId, photoBuffer, mimeType);
-    setReceipt(chatId, receipt);
+    await setReceipt(chatId, receipt);
     return `Got it${receipt.merchant ? ` — ${receipt.merchant}` : ''}. Should I split it evenly, or tell me who had what?`;
   } catch (error) {
     if (error instanceof ExtractionError) {
@@ -54,7 +54,7 @@ export async function handleSplitPhoto(
 }
 
 export async function handleSplitTextMessage(chatId: number, userId: string, message: string): Promise<string> {
-  const state = getSplitState(chatId);
+  const state = await getSplitState(chatId);
   if (!state) {
     throw new Error(`handleSplitTextMessage called with no active split for chat ${chatId}`);
   }
@@ -85,7 +85,7 @@ export async function handleSplitTextMessage(chatId: number, userId: string, mes
         return 'I couldn\'t tell which share is yours — mention yourself as "I" or "me" and try again.';
       }
 
-      setPendingResult(chatId, result);
+      await setPendingResult(chatId, result);
       const breakdown = formatBreakdown(result, receipt.currency);
       const shareCents = Math.round(result.requesterShare.total * 100);
       return `${breakdown}\n\nLog your share of ${formatCurrency(
@@ -116,7 +116,7 @@ export async function handleSplitTextMessage(chatId: number, userId: string, mes
     const receipt = state.receipt;
 
     if (declined) {
-      clearSplit(chatId);
+      await clearSplit(chatId);
       return 'Okay, nothing logged.';
     }
 
@@ -129,7 +129,7 @@ export async function handleSplitTextMessage(chatId: number, userId: string, mes
       source: 'split',
     });
 
-    clearSplit(chatId);
+    await clearSplit(chatId);
 
     return `Logged ${formatCurrency(transaction.amount_sgd, 'SGD')} for ${transaction.merchant} (${transaction.category}).`;
   }

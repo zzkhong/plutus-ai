@@ -7,6 +7,7 @@
 
 import * as cron from 'node-cron';
 import { Api, Bot } from 'grammy';
+import { config } from '../config';
 import { fireRecurringForToday } from '../expense/service';
 import { checkAlerts } from '../budget/alerts';
 import { listApproved } from '../users/service';
@@ -83,12 +84,16 @@ export function startRecurringScheduler(bot: Bot | null): void {
     return;
   }
 
-  schedulerTask = cron.schedule('0 0 * * *', async () => {
-    logger.info('Running recurring transactions scheduler');
-    await fireForAllApprovedUsers(bot);
-  });
+  schedulerTask = cron.schedule(
+    '0 0 * * *',
+    async () => {
+      logger.info('Running recurring transactions scheduler');
+      await fireForAllApprovedUsers(bot);
+    },
+    { timezone: config.APP_TIMEZONE },
+  );
 
-  logger.info('Recurring transactions scheduler started (runs daily at 00:00)');
+  logger.info(`Recurring transactions scheduler started (runs daily at 00:00 ${config.APP_TIMEZONE})`);
 }
 
 /**

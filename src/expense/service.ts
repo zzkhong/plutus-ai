@@ -3,8 +3,6 @@
  */
 
 import { randomUUID } from 'crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { and, desc, eq, gte, lt } from 'drizzle-orm';
 
 import { toSGD } from '../config';
@@ -221,7 +219,15 @@ export async function correctLastTransaction(userId: string, field: string, valu
   return mapTransactionRow(updated);
 }
 
-export async function exportCSV(userId: string, year: number): Promise<string> {
+export interface CsvExport {
+  year: number;
+  filename: string;
+  content: string;
+  rowCount: number;
+}
+
+/** Builds one calendar year of the user's transactions as CSV, in memory — nothing touches disk. */
+export async function exportCSV(userId: string, year: number): Promise<CsvExport> {
   const rows = await db
     .select()
     .from(transactions)
@@ -234,10 +240,6 @@ export async function exportCSV(userId: string, year: number): Promise<string> {
     )
     .orderBy(desc(transactions.created_at));
 
-  const exportDir = path.resolve('./data/exports');
-  fs.mkdirSync(exportDir, { recursive: true });
-
-  const filePath = path.join(exportDir, `expenses-${userId}-${year}.csv`);
   const lines = [
     ['id', 'amount', 'currency', 'amount_sgd', 'merchant', 'category', 'source', 'card_name', 'note', 'created_at'].join(','),
     ...rows.map((row: typeof transactions.$inferSelect) =>
@@ -258,8 +260,12 @@ export async function exportCSV(userId: string, year: number): Promise<string> {
     ),
   ];
 
-  fs.writeFileSync(filePath, `${lines.join('\n')}\n`, 'utf8');
-  return filePath;
+  return {
+    year,
+    filename: `plutus-expenses-${year}.csv`,
+    content: `${lines.join('\n')}\n`,
+    rowCount: rows.length,
+  };
 }
 
 // --- Recurring-transaction functions ---
@@ -337,8 +343,27 @@ export async function fireRecurringForToday(userId: string): Promise<Transaction
       ),
     );
 
+  // Charges this job has already logged today, by recurring template. Makes
+  // the job safe to run more than once a day: the standalone process runs it
+  // at startup and again at midnight, and a scheduled cron call can arrive
+  // twice.
+  const firedToday = await db
+    .select({ recurring_id: transactions.recurring_id })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.user_id, userId),
+        eq(transactions.source, 'recurring'),
+        gte(transactions.created_at, startOfPeriod('today')),
+      ),
+    );
+  const alreadyFired = new Set(firedToday.map((row) => row.recurring_id));
+
   const created: Transaction[] = [];
   for (const recurring of dueRows) {
+    if (alreadyFired.has(recurring.id)) {
+      continue;
+    }
     const amountSgd = toSGD(recurring.amount, recurring.currency as Currency);
     const now = Date.now();
 
@@ -355,6 +380,7 @@ export async function fireRecurringForToday(userId: string): Promise<Transaction
         source: 'recurring',
         card_name: 'Recurring',
         note: `Auto-logged recurring: ${recurring.merchant}`,
+        recurring_id: recurring.id,
         created_at: now,
         updated_at: now,
       })

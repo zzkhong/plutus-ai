@@ -1,71 +1,55 @@
 /**
- * Database connection singleton and initialization
+ * The single database handle.
+ *
+ * libSQL reaches a local SQLite file (`file:` URLs — local development and
+ * tests) and Turso (`libsql://` URLs — production on Vercel) through the
+ * same client, so every query in the app runs unchanged against either.
+ *
+ * Creating the client is cheap and lazy — nothing goes over the network
+ * until the first query — which matters on Vercel, where every cold start
+ * evaluates this module. Migrations are not run here; see ./migrate.ts.
+ *
+ * Don't rely on foreign-key enforcement. SQLite leaves it off unless each
+ * connection opts in, and Turso's remote sessions aren't pinned to one
+ * connection, so ON DELETE CASCADE in the schema is documentation, not
+ * behaviour — delete child rows explicitly (see users/service.ts reject()).
  */
 
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
+import { createClient, Client } from '@libsql/client';
+import { drizzle, LibSQLDatabase } from 'drizzle-orm/libsql';
 import { config } from '../config';
 import * as schema from './schema';
 
-let dbInstance: ReturnType<typeof drizzle> | null = null;
-let sqliteDbInstance: Database.Database | null = null;
+export type Database = LibSQLDatabase<typeof schema>;
 
-/**
- * Initialize database connection and run migrations
- */
-function initializeDatabase(): ReturnType<typeof drizzle> {
-  const dbPath = config.DATABASE_URL;
+let client: Client | null = null;
+let dbInstance: Database | null = null;
 
-  // Ensure data directory exists
-  const dataDir = path.dirname(dbPath);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+function ensureLocalDirectory(url: string): void {
+  if (!url.startsWith('file:')) {
+    return;
   }
-
-  // Create or connect to database
-  const sqliteDb = new Database(dbPath);
-  sqliteDbInstance = sqliteDb;
-
-  // Enable foreign keys
-  sqliteDb.pragma('foreign_keys = ON');
-
-  // Initialize Drizzle
-  const db = drizzle(sqliteDb, { schema });
-
-  // Run migrations automatically on startup
-  try {
-    migrate(db, { migrationsFolder: path.join(__dirname, 'migrations') });
-  } catch (error) {
-    console.error('Failed to run migrations:', error);
-    throw error;
+  const directory = path.dirname(url.slice('file:'.length));
+  if (directory && !fs.existsSync(directory)) {
+    fs.mkdirSync(directory, { recursive: true });
   }
-
-  return db;
 }
 
-/**
- * Get or create database instance
- */
-export function getDb(): ReturnType<typeof drizzle> {
+export function getClient(): Client {
+  if (!client) {
+    ensureLocalDirectory(config.DATABASE_URL);
+    client = createClient({ url: config.DATABASE_URL, authToken: config.DATABASE_AUTH_TOKEN });
+  }
+  return client;
+}
+
+export function getDb(): Database {
   if (!dbInstance) {
-    dbInstance = initializeDatabase();
+    dbInstance = drizzle(getClient(), { schema });
   }
   return dbInstance;
 }
 
-/**
- * Get the underlying better-sqlite3 database instance for transaction support
- */
-export function getSQLiteDb(): Database.Database {
-  if (!sqliteDbInstance) {
-    getDb(); // Initialize via getDb() which sets sqliteDbInstance
-  }
-  return sqliteDbInstance!;
-}
-
-// Export singleton instance
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const db: any = getDb();
+export const db: Database = getDb();

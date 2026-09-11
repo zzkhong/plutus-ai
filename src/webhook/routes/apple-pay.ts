@@ -46,7 +46,15 @@ async function sendConfirmation(bot: Bot | null, user: User, transaction: Transa
   }
 }
 
-export function createApplePayHandler(bot: Bot | null) {
+/**
+ * Injectable so tests can make logExpense fail for real without depending on
+ * database constraints, which Turso doesn't enforce the same way SQLite can.
+ */
+export interface ApplePayDependencies {
+  logExpense: typeof logExpense;
+}
+
+export function createApplePayHandler(bot: Bot | null, deps: ApplePayDependencies = { logExpense }) {
   return async (c: Context<WebhookEnv>): Promise<Response> => {
     // apiKeyAuthMiddleware resolved and approved this user before we got here.
     const user = c.get('user');
@@ -67,7 +75,7 @@ export function createApplePayHandler(bot: Bot | null) {
     }
 
     try {
-      const transaction = await logExpense(user.id, {
+      const transaction = await deps.logExpense(user.id, {
         amount: parsedAmount.amount,
         currency: parsedAmount.currency,
         merchant,
