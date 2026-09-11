@@ -4,7 +4,7 @@
 
 import * as cron from 'node-cron';
 import { Bot } from 'grammy';
-import { config } from '../config';
+import { listApproved } from '../users/service';
 import { logger } from '../utils/logger';
 import { collectDigestData } from './aggregator';
 import { formatDigestMessage } from './formatter';
@@ -12,31 +12,34 @@ import { generateSummaryLine } from './summary';
 
 let schedulerTask: cron.ScheduledTask | null = null;
 
-export async function buildDigestMessage(): Promise<string> {
-  const data = await collectDigestData();
-  const summaryLine = await generateSummaryLine(data);
+export async function buildDigestMessage(userId: string): Promise<string> {
+  const data = await collectDigestData(userId);
+  const summaryLine = await generateSummaryLine(userId, data);
   return formatDigestMessage(data, summaryLine);
 }
 
+/**
+ * Builds and delivers the digest once per approved user, each on their own
+ * telegram_chat_id. One user's failure is logged and never blocks the rest
+ * of the run — same convention as the recurring-transaction cron.
+ */
 export async function triggerDigestNow(bot: Bot | null): Promise<void> {
   if (!bot) {
     logger.warn('Skipping digest delivery: no bot instance available');
     return;
   }
 
-  if (!config.TELEGRAM_AUTHORIZED_CHAT_ID) {
-    logger.warn('Skipping digest delivery: TELEGRAM_AUTHORIZED_CHAT_ID is not configured');
-    return;
-  }
+  const users = await listApproved();
 
-  logger.info('Building daily digest');
-  const message = await buildDigestMessage();
-
-  try {
-    await bot.api.sendMessage(config.TELEGRAM_AUTHORIZED_CHAT_ID, message);
-    logger.info('Daily digest sent');
-  } catch (error) {
-    logger.error('Failed to send daily digest', error);
+  for (const user of users) {
+    try {
+      logger.info(`Building daily digest for user ${user.id}`);
+      const message = await buildDigestMessage(user.id);
+      await bot.api.sendMessage(user.telegram_chat_id, message);
+      logger.info(`Daily digest sent to user ${user.id}`);
+    } catch (error) {
+      logger.error(`Failed to send daily digest to user ${user.id}`, error);
+    }
   }
 }
 

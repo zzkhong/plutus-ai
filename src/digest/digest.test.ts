@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 process.env.DATABASE_URL = './data/test-digest.db';
-process.env.TELEGRAM_AUTHORIZED_CHAT_ID = 'test-chat-id';
 
 const testDbPath = path.resolve('./data/test-digest.db');
 if (fs.existsSync(testDbPath)) {
@@ -14,13 +13,14 @@ if (fs.existsSync(testDbPath)) {
 const originalFetch = global.fetch;
 
 let userId: string;
+const digestChatId = 'test-digest-chat';
 
 before(async () => {
   const { runMigrations } = await import('../db/migrate');
   runMigrations();
   const { createUser, setProvider, completeSetup } = await import('../users/service');
   const { encrypt } = await import('../users/crypto');
-  const user = await createUser('test-digest-chat');
+  const user = await createUser(digestChatId);
   await setProvider(user.id, 'gemini');
   await completeSetup(user.id, encrypt('fake-key-for-tests'), true);
   userId = user.id;
@@ -198,7 +198,7 @@ test('triggerDigestNow does not throw when no bot is available', async () => {
   await assert.doesNotReject(() => triggerDigestNow(null));
 });
 
-test('triggerDigestNow sends the built digest message through the bot api', async () => {
+test('triggerDigestNow sends each approved user their own digest on their own chat', async () => {
   const { triggerDigestNow } = await import('./index');
   const sent: Array<{ chatId: string; text: string }> = [];
   const fakeBot = {
@@ -212,12 +212,61 @@ test('triggerDigestNow sends the built digest message through the bot api', asyn
   await triggerDigestNow(fakeBot);
 
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].chatId, 'test-chat-id');
+  assert.equal(sent[0].chatId, digestChatId);
   assert.match(sent[0].text, /Daily Digest/);
+});
+
+test('triggerDigestNow skips users who are not approved', async () => {
+  const { triggerDigestNow } = await import('./index');
+  const { createUser, setProvider, completeSetup } = await import('../users/service');
+  const { encrypt } = await import('../users/crypto');
+
+  // Finishes setup but stays pending_approval — must not receive a digest.
+  const pending = await createUser('test-digest-pending-chat');
+  await setProvider(pending.id, 'gemini');
+  await completeSetup(pending.id, encrypt('fake-key-for-tests'), false);
+
+  const sent: Array<{ chatId: string; text: string }> = [];
+  const fakeBot = {
+    api: {
+      sendMessage: async (chatId: string, text: string) => {
+        sent.push({ chatId, text });
+      },
+    },
+  } as any;
+
+  await triggerDigestNow(fakeBot);
+
+  assert.ok(!sent.some((message) => message.chatId === 'test-digest-pending-chat'));
+});
+
+test('triggerDigestNow keeps going when one user fails', async () => {
+  const { triggerDigestNow } = await import('./index');
+  const { createUser, setProvider, completeSetup } = await import('../users/service');
+  const { encrypt } = await import('../users/crypto');
+
+  const second = await createUser('test-digest-second-chat');
+  await setProvider(second.id, 'gemini');
+  await completeSetup(second.id, encrypt('fake-key-for-tests'), true);
+
+  const sent: Array<{ chatId: string; text: string }> = [];
+  const fakeBot = {
+    api: {
+      sendMessage: async (chatId: string, text: string) => {
+        if (chatId === digestChatId) {
+          throw new Error('simulated Telegram failure for the first user');
+        }
+        sent.push({ chatId, text });
+      },
+    },
+  } as any;
+
+  await assert.doesNotReject(() => triggerDigestNow(fakeBot));
+  assert.ok(sent.some((message) => message.chatId === 'test-digest-second-chat'));
 });
 
 test('buildDigestMessage returns a string containing the digest header', async () => {
   const { buildDigestMessage } = await import('./index');
-  const message = await buildDigestMessage();
+  const message = await buildDigestMessage(userId);
   assert.match(message, /^Daily Digest - /);
 });
