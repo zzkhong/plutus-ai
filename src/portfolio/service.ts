@@ -3,7 +3,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../db';
 import { holdings } from '../db/schema';
 import { AssetClass, Currency } from '../types';
@@ -25,8 +25,36 @@ function mapHoldingRow(row: typeof holdings.$inferSelect): Holding {
   };
 }
 
-/** Manual (crypto/cash) holdings only — never touches broker-sourced rows. */
+/**
+ * Thrown by addHolding when the symbol already comes from a broker statement:
+ * adding it by hand as well would count it twice in net worth.
+ */
+export class StatementHoldingConflictError extends Error {
+  constructor(
+    public readonly symbol: string,
+    public readonly broker: Broker,
+  ) {
+    super(`${symbol} is already held via the ${broker} statement`);
+  }
+}
+
+/** The broker a statement-imported holding came from, or null if none has that symbol. */
+export async function findStatementHolding(userId: string, symbol: string): Promise<Broker | null> {
+  const row = await db
+    .select({ broker: holdings.broker })
+    .from(holdings)
+    .where(and(eq(holdings.user_id, userId), eq(holdings.symbol, symbol), isNotNull(holdings.broker)))
+    .get();
+  return (row?.broker as Broker | undefined) ?? null;
+}
+
+/** Holdings entered in chat only — never touches broker-sourced rows. */
 export async function addHolding(userId: string, input: HoldingInput): Promise<Holding> {
+  const statementBroker = await findStatementHolding(userId, input.symbol);
+  if (statementBroker) {
+    throw new StatementHoldingConflictError(input.symbol, statementBroker);
+  }
+
   const now = Date.now();
   const existing = await db
     .select()
@@ -70,11 +98,17 @@ export async function addHolding(userId: string, input: HoldingInput): Promise<H
   return mapHoldingRow(inserted);
 }
 
-/** Manual (crypto/cash) holdings only — never touches broker-sourced rows. */
-export async function removeHolding(userId: string, symbol: string): Promise<void> {
-  await db
+/**
+ * Holdings entered in chat only — never touches broker-sourced rows. Returns
+ * how many rows it removed, so the caller can tell "removed" apart from
+ * "nothing to remove" and "that one comes from a statement".
+ */
+export async function removeHolding(userId: string, symbol: string): Promise<number> {
+  const removed = await db
     .delete(holdings)
-    .where(and(eq(holdings.user_id, userId), eq(holdings.symbol, symbol), isNull(holdings.broker)));
+    .where(and(eq(holdings.user_id, userId), eq(holdings.symbol, symbol), isNull(holdings.broker)))
+    .returning({ id: holdings.id });
+  return removed.length;
 }
 
 /**

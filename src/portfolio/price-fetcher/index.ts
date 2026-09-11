@@ -1,6 +1,7 @@
 /**
- * Unified price fetching across asset classes, with a short in-memory
- * TTL cache (mirroring src/config/exchange-rates.ts — no DB-backed cache).
+ * Unified price fetching across asset classes, with a short in-memory TTL
+ * cache. There's no DB-backed cache; on Vercel the cache lives only as long
+ * as a function instance, which just means refetching.
  */
 
 import { Holding, PriceQuote } from '../types';
@@ -54,7 +55,7 @@ export async function getPrice(holding: Holding): Promise<PriceQuote | null> {
   let ttl: number;
 
   if (holding.asset_class === 'crypto') {
-    quote = await withTimeout(getCryptoPrice(holding.symbol as 'BTC' | 'ETH' | 'BETH'), FETCH_TIMEOUT_MS);
+    quote = await withTimeout(getCryptoPrice(holding.symbol), FETCH_TIMEOUT_MS);
     ttl = CRYPTO_TTL_MS;
   } else {
     quote = await withTimeout(getStockPrice(holding.symbol, holding.asset_class, holding.currency), FETCH_TIMEOUT_MS);

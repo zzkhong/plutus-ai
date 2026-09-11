@@ -205,7 +205,7 @@ test('buildAssistantReply removes a holding when the action indicates removal', 
   assert.ok(!allHoldings.some((h) => h.symbol === 'ETH'));
 });
 
-test('buildAssistantReply falls back to crypto when the holdings intent has an unrecognized asset class', async () => {
+test('buildAssistantReply keeps a stock entered in chat as a stock, instead of filing it as crypto', async () => {
   const { buildAssistantReply } = await import('./ai');
   const reply = await buildAssistantReply(userId, {
     intent: 'holdings',
@@ -221,7 +221,8 @@ test('buildAssistantReply falls back to crypto when the holdings intent has an u
   const aapl = allHoldings.find((h) => h.symbol === 'AAPL');
 
   assert.ok(aapl);
-  assert.equal(aapl!.asset_class, 'crypto');
+  assert.equal(aapl!.asset_class, 'stocks_us');
+  assert.equal(aapl!.currency, 'USD');
 });
 
 test('buildAssistantReply falls back to USD when the holdings intent has an unrecognized currency', async () => {
@@ -241,6 +242,89 @@ test('buildAssistantReply falls back to USD when the holdings intent has an unre
 
   assert.ok(doge);
   assert.equal(doge!.currency, 'USD');
+});
+
+test('buildAssistantReply asks whether an unknown symbol is a coin or a stock rather than guessing crypto', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply(userId, {
+    intent: 'holdings',
+    confidence: 0.9,
+    extracted: { symbol: 'XYZ', amount: 5 },
+    rawText: 'I hold 5 XYZ',
+  });
+
+  assert.match(reply, /crypto coin or a stock/i);
+  const { listHoldings } = await import('../portfolio/service');
+  assert.ok(!(await listHoldings(userId)).some((h) => h.symbol === 'XYZ'));
+});
+
+test('buildAssistantReply infers crypto for a listed coin even without an asset class', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  await buildAssistantReply(userId, {
+    intent: 'holdings',
+    confidence: 0.9,
+    extracted: { symbol: 'sol', amount: 2 },
+    rawText: 'I hold 2 SOL',
+  });
+
+  const { listHoldings } = await import('../portfolio/service');
+  const sol = (await listHoldings(userId)).find((h) => h.symbol === 'SOL');
+  assert.equal(sol?.asset_class, 'crypto');
+});
+
+test('buildAssistantReply warns when a crypto coin has no price source', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply(userId, {
+    intent: 'holdings',
+    confidence: 0.9,
+    extracted: { symbol: 'FOOCOIN', amount: 5, assetClass: 'crypto' },
+    rawText: 'I hold 5 FOOCOIN',
+  });
+
+  assert.match(reply, /no price source|don't have a price source/i);
+});
+
+test('buildAssistantReply explains a statement holding cannot be removed by hand, instead of claiming it was', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { replaceHoldingsForBroker, listHoldings } = await import('../portfolio/service');
+  await replaceHoldingsForBroker(userId, 'ibkr', [
+    { symbol: 'MSFT', name: 'Microsoft', quantity: 3, asset_class: 'stocks_us', currency: 'USD', market: 'NASDAQ' },
+  ]);
+
+  const reply = await buildAssistantReply(userId, {
+    intent: 'holdings',
+    confidence: 0.9,
+    extracted: { symbol: 'MSFT', action: 'remove' },
+    rawText: 'Remove my MSFT holding',
+  });
+
+  assert.match(reply, /IBKR statement/);
+  assert.doesNotMatch(reply, /Done/);
+  assert.ok((await listHoldings(userId)).some((h) => h.symbol === 'MSFT'));
+});
+
+test('buildAssistantReply says so when there is nothing to remove', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply(userId, {
+    intent: 'holdings',
+    confidence: 0.9,
+    extracted: { symbol: 'NOTHELD', action: 'remove' },
+    rawText: 'Remove NOTHELD',
+  });
+
+  assert.match(reply, /don't have a NOTHELD holding/i);
+});
+
+test('buildAssistantReply refuses to add by hand a stock that already comes from a statement', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const reply = await buildAssistantReply(userId, {
+    intent: 'holdings',
+    confidence: 0.9,
+    extracted: { symbol: 'MSFT', amount: 5, assetClass: 'stocks_us' },
+    rawText: 'I hold 5 MSFT shares',
+  });
+
+  assert.match(reply, /already in your IBKR statement/);
 });
 
 test('buildAssistantReply asks which holding when the holdings intent has no symbol', async () => {

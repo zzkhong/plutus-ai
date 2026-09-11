@@ -35,8 +35,9 @@ below for the full list.
   month, and the bot pings you the first time you cross a threshold.
 - **Portfolio tracker** — `/portfolio` for net worth and allocation across
   brokerage (upload an IBKR/Moomoo statement PDF), crypto, and cash (add
-  crypto/cash holdings in chat, e.g. "I hold 0.5 BTC"). Prices come from
-  Yahoo Finance and CoinGecko.
+  crypto, stock or cash holdings in chat, e.g. "I hold 0.5 BTC" or "I hold
+  10 AAPL shares"). Prices come from Yahoo Finance (US, SGX and Bursa
+  stocks) and CoinGecko (the major coins).
 - **Bill splitting** — `/split`, send a receipt photo, then say "split
   evenly among 3" or "Alice had the burger, I had the salad" — the bot
   extracts line items, computes each person's share (tax/tip applied

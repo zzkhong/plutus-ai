@@ -21,7 +21,7 @@ const VALID_STATEMENT_CURRENCIES = new Set(['USD', 'MYR', 'SGD']);
 
 const SYSTEM_INSTRUCTION = `You are a financial statement parser for Pluto AI. You will receive a PDF of a brokerage statement from either Interactive Brokers (IBKR) or Moomoo. Identify which broker issued it from its layout/branding, then extract every open stock/ETF position from its "Open Positions" (IBKR) or "Positions" (Moomoo) section. Return strict JSON only, matching exactly this shape:
 {"broker": "ibkr" | "moomoo", "holdings": [{"symbol": string, "name": string, "quantity": number, "asset_class": "stocks_us" | "stocks_my" | "stocks_sg", "currency": "USD" | "MYR" | "SGD", "market": string}]}
-Do not include cash balances, options, or futures. If you cannot confidently identify the broker or find no open positions, return {"broker": null, "holdings": []}.`;
+"symbol" must be the exchange ticker code, never the company name and without any exchange suffix: a US ticker (AAPL), an SGX stock code (D05 for DBS, C6L for Singapore Airlines), or a Bursa Malaysia stock code (1155 for Maybank) — prices are looked up by that code. Do not include cash balances, options, or futures. If you cannot confidently identify the broker or find no open positions, return {"broker": null, "holdings": []}.`;
 
 export function parseGeminiStatementResponse(rawText: string): ParsedStatement {
   const start = rawText.indexOf('{');

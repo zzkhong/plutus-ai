@@ -1,10 +1,11 @@
 /**
- * Manual mapping from a broker statement's reported symbol to the Yahoo
- * Finance chart-API symbol, for MY (Bursa, `.KL`) and SG (SGX, `.SI`)
- * stocks. A Moomoo statement reports a stock by name or local code, which
- * won't reliably match Yahoo's numeric/ticker symbol — fill in an entry
- * here whenever a new MY/SG holding is added. An unmapped symbol degrades
- * to "price unavailable" rather than guessing.
+ * Manual overrides from a statement's reported symbol to a Yahoo Finance
+ * chart-API symbol, for MY (Bursa, `.KL`) and SG (SGX, `.SI`) stocks.
+ *
+ * Usually not needed: a bare exchange code is resolved automatically
+ * (`D05` → `D05.SI`, `1155` → `1155.KL`, see stocks.ts). Add an entry only
+ * when a statement reports a stock some other way — by name, say — that
+ * can't be turned into its code.
  */
 export const SYMBOL_MAP: Record<string, string> = {
   // e.g. 'MAYBANK': '1155.KL', 'SIA': 'C6L.SI'

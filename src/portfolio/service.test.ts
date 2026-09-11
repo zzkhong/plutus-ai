@@ -112,3 +112,36 @@ test('replaceHoldingsForBroker never touches another user\'s holdings for the sa
   const theirs = await listHoldings(otherUser.id);
   assert.ok(theirs.some((h) => h.symbol === 'TSLA'));
 });
+
+test('removeHolding reports how many rows it removed', async () => {
+  const { addHolding, removeHolding } = await import('./service');
+  await addHolding(userId, { symbol: 'ADA', name: 'Cardano', quantity: 50, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
+
+  assert.equal(await removeHolding(userId, 'ADA'), 1);
+  assert.equal(await removeHolding(userId, 'ADA'), 0);
+});
+
+test('removeHolding never removes a statement-imported holding, and findStatementHolding names its broker', async () => {
+  const { removeHolding, replaceHoldingsForBroker, findStatementHolding, listHoldings } = await import('./service');
+  await replaceHoldingsForBroker(userId, 'moomoo', [
+    { symbol: 'D05', name: 'DBS Group', quantity: 100, asset_class: 'stocks_sg', currency: 'SGD', market: 'SGX' },
+  ]);
+
+  assert.equal(await removeHolding(userId, 'D05'), 0);
+  assert.ok((await listHoldings(userId)).some((h) => h.symbol === 'D05'));
+  assert.equal(await findStatementHolding(userId, 'D05'), 'moomoo');
+  assert.equal(await findStatementHolding(userId, 'NOPE'), null);
+});
+
+test('addHolding refuses a symbol that already comes from a statement, so it is not counted twice', async () => {
+  const { addHolding, replaceHoldingsForBroker, StatementHoldingConflictError, listHoldings } = await import('./service');
+  await replaceHoldingsForBroker(userId, 'moomoo', [
+    { symbol: 'C6L', name: 'Singapore Airlines', quantity: 200, asset_class: 'stocks_sg', currency: 'SGD', market: 'SGX' },
+  ]);
+
+  await assert.rejects(
+    () => addHolding(userId, { symbol: 'C6L', name: 'C6L', quantity: 5, asset_class: 'stocks_sg', currency: 'SGD', market: 'SGX' }),
+    StatementHoldingConflictError,
+  );
+  assert.equal((await listHoldings(userId)).filter((h) => h.symbol === 'C6L').length, 1);
+});

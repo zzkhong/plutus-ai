@@ -8,9 +8,57 @@ import { logger } from '../utils/logger';
 import { formatUserFriendlyError } from './formatter/messages';
 import { BotIntent } from './types';
 import { AssetClass, Currency } from '../types';
+import { isPricedCrypto } from '../portfolio/price-fetcher/crypto';
 import { ExpenseSource, SpendingPeriod } from '../expense/types';
 
-const VALID_HOLDINGS_ASSET_CLASSES = new Set(['crypto', 'cash']);
+const HOLDING_ASSET_CLASSES = new Set<string>(['crypto', 'cash', 'stocks_us', 'stocks_sg', 'stocks_my']);
+const HOLDING_MARKET: Record<AssetClass, string> = {
+  crypto: 'Crypto',
+  cash: 'Cash',
+  stocks_us: 'US',
+  stocks_sg: 'SGX',
+  stocks_my: 'Bursa',
+};
+// A stock is priced in its listing currency, whatever the message said.
+const LISTING_CURRENCY: Partial<Record<AssetClass, Currency>> = {
+  stocks_us: 'USD',
+  stocks_sg: 'SGD',
+  stocks_my: 'MYR',
+};
+const CASH_CURRENCIES = new Set(['SGD', 'MYR', 'USD']);
+
+/**
+ * The classifier's asset class when it gave a valid one; otherwise inferred
+ * only where it's unambiguous (a coin with a price source, or a currency code
+ * as cash). Anything else returns null so the bot asks. It used to default
+ * to crypto, which filed "10 AAPL" as a coin that could never be priced.
+ */
+function resolveHoldingAssetClass(symbol: string, assetClass: string | undefined): AssetClass | null {
+  if (assetClass && HOLDING_ASSET_CLASSES.has(assetClass)) {
+    return assetClass as AssetClass;
+  }
+  if (isPricedCrypto(symbol)) {
+    return 'crypto';
+  }
+  if (CASH_CURRENCIES.has(symbol)) {
+    return 'cash';
+  }
+  return null;
+}
+
+function resolveHoldingCurrency(symbol: string, assetClass: AssetClass, currency: string | undefined): Currency {
+  const listing = LISTING_CURRENCY[assetClass];
+  if (listing) {
+    return listing;
+  }
+  if (currency && VALID_CURRENCIES.has(currency)) {
+    return currency as Currency;
+  }
+  if (assetClass === 'cash' && CASH_CURRENCIES.has(symbol)) {
+    return symbol as Currency;
+  }
+  return 'USD';
+}
 const VALID_CURRENCIES = new Set(['SGD', 'MYR', 'USD', 'BTC', 'ETH', 'BETH']);
 const VALID_SPENDING_PERIODS = new Set(['today', 'week', 'month']);
 
@@ -91,7 +139,7 @@ export async function classifyUserMessage(userId: string, rawText: string): Prom
     // service error.
     const response = await provider.generateText({
       systemInstruction:
-        'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action, symbol, assetClass, currency, dayOfMonth }, rawText. Allowed intents: expense, query, budget, correction, recurring, holdings, help, unknown. The holdings intent covers non-brokerage portfolio updates like "I hold 0.5 BTC" or "cash SGD 5000" — extract symbol (e.g. BTC, SGD), assetClass (crypto or cash), currency, and amount as the quantity. The recurring intent covers repeating charges like "Netflix $15.98 every 5th" or "cancel my Spotify subscription" — extract merchant, amount, and dayOfMonth (1-31, the day of the month it recurs on) for a new one, or action="remove" and merchant for cancelling an existing one. The query intent covers spending questions like "how much did I spend this week" — extract period as one of today, week, or month. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
+        'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action, symbol, assetClass, currency, dayOfMonth }, rawText. Allowed intents: expense, query, budget, correction, recurring, holdings, help, unknown. The holdings intent covers portfolio holdings entered by hand, like "I hold 0.5 BTC", "I hold 10 AAPL shares", "I have 1000 DBS shares" or "cash SGD 5000" — extract symbol as the coin or exchange ticker code, never a company name (BTC, AAPL, SGD; for SGX and Bursa stocks the exchange stock code, e.g. DBS is D05, Singapore Airlines is C6L, Maybank is 1155), assetClass (one of crypto, cash, stocks_us, stocks_sg, stocks_my), currency, and amount as the quantity; set action="remove" when the user wants a holding removed. The recurring intent covers repeating charges like "Netflix $15.98 every 5th" or "cancel my Spotify subscription" — extract merchant, amount, and dayOfMonth (1-31, the day of the month it recurs on) for a new one, or action="remove" and merchant for cancelling an existing one. The query intent covers spending questions like "how much did I spend this week" — extract period as one of today, week, or month. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
       contents: [{ text: prompt }],
       timeoutMs: 15000,
     });
@@ -247,18 +295,25 @@ export async function buildAssistantReply(
       return `Got it — I'll log $${amount.toFixed(2)} at ${recurring.merchant} every month on day ${recurring.day_of_month}.`;
     }
     case 'holdings': {
-      const { addHolding, removeHolding } = await import('../portfolio/service');
+      const { addHolding, removeHolding, findStatementHolding, StatementHoldingConflictError } = await import(
+        '../portfolio/service'
+      );
 
       if (!extracted.symbol) {
-        return `Which holding? Try "I hold 0.5 BTC" or "cash SGD 5000".`;
+        return `Which holding? Try "I hold 0.5 BTC", "I hold 10 AAPL shares" or "cash SGD 5000".`;
       }
 
-      const symbol = extracted.symbol.toUpperCase();
+      const symbol = extracted.symbol.trim().toUpperCase();
       const isRemoval = /remove|delete/i.test(extracted.action ?? rawText);
 
       if (isRemoval) {
-        await removeHolding(userId, symbol);
-        return `Done — removed ${symbol} from your holdings.`;
+        if ((await removeHolding(userId, symbol)) > 0) {
+          return `Done — removed ${symbol} from your holdings.`;
+        }
+        const broker = await findStatementHolding(userId, symbol);
+        return broker
+          ? `${symbol} comes from your ${broker.toUpperCase()} statement, so it can't be removed by hand — upload a newer statement and it will drop off once you've sold it.`
+          : `You don't have a ${symbol} holding to remove.`;
       }
 
       const quantity = extracted.amount ?? 0;
@@ -266,22 +321,31 @@ export async function buildAssistantReply(
         return `How much ${symbol} do you hold?`;
       }
 
-      const assetClass: AssetClass = VALID_HOLDINGS_ASSET_CLASSES.has(extracted.assetClass ?? '')
-        ? (extracted.assetClass as AssetClass)
-        : 'crypto';
-      const currency: Currency = VALID_CURRENCIES.has(extracted.currency ?? '')
-        ? (extracted.currency as Currency)
-        : 'USD';
+      const assetClass = resolveHoldingAssetClass(symbol, extracted.assetClass);
+      if (!assetClass) {
+        return `Is ${symbol} a crypto coin or a stock? For a stock, try "I hold ${quantity} ${symbol} shares".`;
+      }
 
-      const holding = await addHolding(userId, {
-        symbol,
-        name: symbol,
-        quantity,
-        asset_class: assetClass,
-        currency,
-        market: assetClass === 'cash' ? 'Cash' : 'Crypto',
-      });
+      let holding;
+      try {
+        holding = await addHolding(userId, {
+          symbol,
+          name: symbol,
+          quantity,
+          asset_class: assetClass,
+          currency: resolveHoldingCurrency(symbol, assetClass, extracted.currency),
+          market: HOLDING_MARKET[assetClass],
+        });
+      } catch (error) {
+        if (error instanceof StatementHoldingConflictError) {
+          return `${symbol} is already in your ${error.broker.toUpperCase()} statement holdings — upload a newer statement to change it, so it isn't counted twice.`;
+        }
+        throw error;
+      }
 
+      if (assetClass === 'crypto' && !isPricedCrypto(symbol)) {
+        return `Recorded ${holding.quantity} ${holding.symbol}, but I don't have a price source for ${symbol} yet, so it counts as S$0 in your net worth.`;
+      }
       return `Got it — recorded ${holding.quantity} ${holding.symbol}.`;
     }
     case 'query': {
