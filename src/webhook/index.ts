@@ -10,9 +10,10 @@ import { config } from '../config';
 import { logger } from '../utils/logger';
 import { apiKeyAuthMiddleware } from './auth';
 import { createApplePayHandler } from './routes/apple-pay';
+import { WebhookEnv } from './types';
 
-export function createWebhookApp(bot: Bot | null): Hono {
-  const app = new Hono();
+export function createWebhookApp(bot: Bot | null): Hono<WebhookEnv> {
+  const app = new Hono<WebhookEnv>();
 
   app.get('/api/health', (c) => c.json({ status: 'ok' }));
   app.post('/api/apple-pay', apiKeyAuthMiddleware, createApplePayHandler(bot));
@@ -21,13 +22,8 @@ export function createWebhookApp(bot: Bot | null): Hono {
 }
 
 export function startWebhookServer(bot: Bot | null): ServerType | null {
-  if (!config.WEBHOOK_API_KEY) {
-    logger.error(
-      'Webhook server not started: WEBHOOK_API_KEY is not configured. Set it in .env to accept iOS Shortcut requests.',
-    );
-    return null;
-  }
-
+  // No global secret gate any more — each approved user authenticates with
+  // their own users.webhook_api_key, so the server is always safe to start.
   const app = createWebhookApp(bot);
   const port = Number(config.PORT);
 

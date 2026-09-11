@@ -7,10 +7,11 @@ import { Context } from 'hono';
 import { Bot } from 'grammy';
 import { logExpense } from '../../expense/service';
 import { parseExplicitCurrency } from '../../expense/currency-resolver';
-import { config, formatCurrency } from '../../config';
+import { formatCurrency } from '../../config';
 import { logger } from '../../utils/logger';
 import { Currency, Transaction } from '../../types';
-import { ApplePayPayload } from '../types';
+import { User } from '../../users/types';
+import { ApplePayPayload, WebhookEnv } from '../types';
 
 function parseAmount(raw: unknown): { amount: number; currency?: Currency } | null {
   if (typeof raw !== 'string' || raw.trim() === '') {
@@ -30,8 +31,8 @@ function parseAmount(raw: unknown): { amount: number; currency?: Currency } | nu
   return { amount, currency };
 }
 
-async function sendConfirmation(bot: Bot | null, transaction: Transaction): Promise<void> {
-  if (!bot || !config.TELEGRAM_AUTHORIZED_CHAT_ID) {
+async function sendConfirmation(bot: Bot | null, user: User, transaction: Transaction): Promise<void> {
+  if (!bot) {
     return;
   }
 
@@ -39,14 +40,17 @@ async function sendConfirmation(bot: Bot | null, transaction: Transaction): Prom
   const message = `Spent ${amountLabel} at ${transaction.merchant} — ${transaction.category}`;
 
   try {
-    await bot.api.sendMessage(config.TELEGRAM_AUTHORIZED_CHAT_ID, message);
+    await bot.api.sendMessage(user.telegram_chat_id, message);
   } catch (error) {
     logger.error('Failed to send Apple Pay confirmation via Telegram', error);
   }
 }
 
 export function createApplePayHandler(bot: Bot | null) {
-  return async (c: Context): Promise<Response> => {
+  return async (c: Context<WebhookEnv>): Promise<Response> => {
+    // apiKeyAuthMiddleware resolved and approved this user before we got here.
+    const user = c.get('user');
+
     let payload: Partial<ApplePayPayload>;
     try {
       payload = await c.req.json();
@@ -63,7 +67,7 @@ export function createApplePayHandler(bot: Bot | null) {
     }
 
     try {
-      const transaction = await logExpense({
+      const transaction = await logExpense(user.id, {
         amount: parsedAmount.amount,
         currency: parsedAmount.currency,
         merchant,
@@ -71,7 +75,7 @@ export function createApplePayHandler(bot: Bot | null) {
         source: 'apple_pay',
       });
 
-      await sendConfirmation(bot, transaction);
+      await sendConfirmation(bot, user, transaction);
 
       return c.json(
         {

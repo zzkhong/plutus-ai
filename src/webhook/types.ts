@@ -2,6 +2,15 @@
  * iOS Shortcut webhook payload/response types
  */
 
+import { User } from '../users/types';
+
+/** Hono env for the webhook app — `user` is set by apiKeyAuthMiddleware. */
+export type WebhookEnv = {
+  Variables: {
+    user: User;
+  };
+};
+
 export interface ApplePayPayload {
   amount: string;
   merchant: string;

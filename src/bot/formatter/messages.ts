@@ -24,6 +24,7 @@ export function formatLines(title: string, lines: string[]): string {
 
 export function formatHelpMessage(): string {
   return formatLines('Plutus commands', [
+    '/setup - register, or rotate your LLM API key',
     '/portfolio - quick portfolio check',
     '/today - today\'s spend',
     '/month - monthly breakdown',
@@ -33,6 +34,7 @@ export function formatHelpMessage(): string {
     '/split - split a bill from a receipt photo',
     '/cancel - cancel an in-progress split',
     '/digest - preview tonight\'s digest',
+    '/webhookkey - your iOS Shortcut webhook key',
     '/help - this menu',
     '',
     'Or just message me naturally, like “Spent $4.50 at Ya Kun”.',
