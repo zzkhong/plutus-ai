@@ -1,6 +1,43 @@
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGeminiStatementResponse, StatementParseError } from './statement-parser';
+import fs from 'node:fs';
+import path from 'node:path';
+
+// DATABASE_URL must be set before anything pulls in src/config or src/db.
+// TypeScript hoists every `require` above this line, so ./statement-parser
+// (which reaches src/db through users/service) is loaded dynamically in the
+// before hook instead of imported statically — a static import here would
+// open and migrate the real ./data/pluto.db.
+process.env.DATABASE_URL = './data/test-statement-parser.db';
+
+const testDbPath = path.resolve('./data/test-statement-parser.db');
+if (fs.existsSync(testDbPath)) {
+  fs.rmSync(testDbPath, { force: true });
+}
+
+type StatementParserModule = typeof import('./statement-parser');
+
+let parseGeminiStatementResponse: StatementParserModule['parseGeminiStatementResponse'];
+let StatementParseError: StatementParserModule['StatementParseError'];
+
+// parseStatement resolves the caller's own provider/key off their users row,
+// so even the failure-path test needs a real approved user to resolve.
+let userId: string;
+
+before(async () => {
+  const { runMigrations } = await import('../db/migrate');
+  runMigrations();
+  const { createUser, setProvider, completeSetup } = await import('../users/service');
+  const { encrypt } = await import('../users/crypto');
+  const user = await createUser('test-statement-parser-chat');
+  await setProvider(user.id, 'gemini');
+  await completeSetup(user.id, encrypt('fake-key-for-tests'), true);
+  userId = user.id;
+
+  const statementParser = await import('./statement-parser');
+  parseGeminiStatementResponse = statementParser.parseGeminiStatementResponse;
+  StatementParseError = statementParser.StatementParseError;
+});
 
 test('parseGeminiStatementResponse maps a valid IBKR JSON response', () => {
   const raw = `Here you go:\n{"broker": "ibkr", "holdings": [{"symbol": "AAPL", "name": "Apple Inc.", "quantity": 10, "asset_class": "stocks_us", "currency": "USD", "market": "NASDAQ"}]}`;
@@ -72,7 +109,7 @@ test('parseStatement surfaces a Gemini/network failure as StatementParseError, n
 
   try {
     const { parseStatement } = await import('./statement-parser');
-    await assert.rejects(() => parseStatement(Buffer.from('%PDF-1.4 fake')), StatementParseError);
+    await assert.rejects(() => parseStatement(userId, Buffer.from('%PDF-1.4 fake')), StatementParseError);
   } finally {
     global.fetch = originalFetch;
   }

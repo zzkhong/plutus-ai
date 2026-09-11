@@ -30,10 +30,15 @@ test(
     const { classifyUserMessage } = await import('./ai');
     const { setProvider, completeSetup } = await import('../users/service');
     const { encrypt } = await import('../users/crypto');
-    const { config } = await import('../config');
+
+    // Read straight off the environment: GOOGLE_API_KEY is no longer part of
+    // the validated app config (every user brings their own key), it is just
+    // a convenient place to park a real key for this opt-in live test.
+    const liveKey = process.env.GOOGLE_API_KEY;
+    assert.ok(liveKey, 'set GOOGLE_API_KEY in the environment to run this live test');
 
     await setProvider(userId, 'gemini');
-    await completeSetup(userId, encrypt(config.GOOGLE_API_KEY), true);
+    await completeSetup(userId, encrypt(liveKey), true);
 
     const result = await classifyUserMessage(userId, 'Spent $4.50 at Ya Kun');
     assert.equal(result.intent, 'expense');

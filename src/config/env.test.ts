@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 const VALID_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'; // 64 hex chars
 const BASE_ENV = {
   DATABASE_URL: './data/test-env-config.db',
-  GOOGLE_API_KEY: 'unused-in-this-file',
   ENCRYPTION_KEY: VALID_KEY,
 };
 
@@ -15,7 +14,6 @@ function loadConfigWith(env: Record<string, string | undefined>): unknown {
 
   try {
     delete require.cache[require.resolve('./env')];
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     return require('./env').config;
   } finally {
     Object.keys(process.env).forEach((key) => delete process.env[key]);
