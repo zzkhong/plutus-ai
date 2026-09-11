@@ -10,8 +10,33 @@ import { GeminiProvider } from './gemini';
 
 export type ContentPart = { text: string } | { inlineData: { mimeType: string; data: string } };
 
+export interface GenerateTextParams {
+  systemInstruction: string;
+  contents: ContentPart[];
+  timeoutMs?: number;
+}
+
+export interface GroundedResult {
+  text: string;
+  /**
+   * False when the answer came from the model's training data rather than a
+   * live web search — either the provider has no grounding tool, or the
+   * grounded call was rejected and we fell back. Callers are expected to
+   * caveat the output when this is false.
+   */
+  grounded: boolean;
+}
+
 export interface LLMProvider {
-  generateText(params: { systemInstruction: string; contents: ContentPart[]; timeoutMs?: number }): Promise<string>;
+  generateText(params: GenerateTextParams): Promise<string>;
+
+  /**
+   * Generates using the provider's native web-search grounding where it has
+   * one. Implementations must still return text with `grounded: false`
+   * rather than throwing when grounding is unavailable — a missing search
+   * tool is not an error, it just makes the answer less current.
+   */
+  generateGroundedText(params: GenerateTextParams): Promise<GroundedResult>;
 }
 
 export function getProviderForUser(user: User): LLMProvider {

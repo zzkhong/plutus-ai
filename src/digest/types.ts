@@ -12,5 +12,5 @@ export interface DigestData {
   spending: SectionResult<SpendingSummary>;
   recurringFired: SectionResult<Transaction[]>;
   budgetStatuses: SectionResult<BudgetStatus[]>;
-  portfolio: { error: string };
+  portfolio: SectionResult<string>;
 }

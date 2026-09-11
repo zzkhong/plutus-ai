@@ -56,7 +56,10 @@ test('collectDigestData returns real data for all live sources and a permanent p
   assert.ok('total' in (data.spending as object));
   assert.ok(Array.isArray(data.recurringFired));
   assert.ok(Array.isArray(data.budgetStatuses));
-  assert.deepEqual(data.portfolio, { error: 'not yet implemented' });
+  // No holdings on file for this user, so the portfolio section is the
+  // friendly empty state — not an error, and no LLM call is spent.
+  const { NO_HOLDINGS_MESSAGE } = await import('../portfolio/advice');
+  assert.equal(data.portfolio, NO_HOLDINGS_MESSAGE);
 });
 
 function emptySpending() {
@@ -70,7 +73,7 @@ test('formatDigestMessage renders "no spending today" when total is zero', async
     spending: emptySpending(),
     recurringFired: [],
     budgetStatuses: [],
-    portfolio: { error: 'not yet implemented' },
+    portfolio: { error: 'price fetch failed' },
   };
 
   const message = formatDigestMessage(data as any, 'All good.');
@@ -84,7 +87,7 @@ test('formatDigestMessage omits Budget/Auto-logged when empty and renders them w
     spending: { period: 'today' as const, total: 1000, count: 1, byCategory: { Food: 1000 }, byCategoryCount: { Food: 1 }, topExpenses: [] },
     recurringFired: [],
     budgetStatuses: [],
-    portfolio: { error: 'not yet implemented' },
+    portfolio: { error: 'price fetch failed' },
   };
 
   const emptyMessage = formatDigestMessage(baseData as any, 'All good.');
@@ -126,18 +129,62 @@ test('formatDigestMessage omits Budget/Auto-logged when empty and renders them w
   assert.match(filledMessage, /Budget: Food 62\.5% used \(3 days left\)/);
 });
 
-test('formatDigestMessage renders the portfolio stub as unavailable', async () => {
+test('formatDigestMessage renders a failed portfolio section as unavailable', async () => {
   const { formatDigestMessage } = await import('./formatter');
 
   const data = {
     spending: emptySpending(),
     recurringFired: [],
     budgetStatuses: [],
-    portfolio: { error: 'not yet implemented' },
+    portfolio: { error: 'price fetch failed' },
   };
 
   const message = formatDigestMessage(data as any, 'All good.');
-  assert.match(message, /Portfolio: unavailable \(not yet implemented\)/);
+  assert.match(message, /Portfolio: unavailable \(price fetch failed\)/);
+});
+
+test('formatDigestMessage renders portfolio advice text under a Portfolio heading', async () => {
+  const { formatDigestMessage } = await import('./formatter');
+
+  const data = {
+    spending: emptySpending(),
+    recurringFired: [],
+    budgetStatuses: [],
+    portfolio: 'Markets were flat today. Hold.',
+  };
+
+  const message = formatDigestMessage(data as any, 'All good.');
+  assert.match(message, /Portfolio:\nMarkets were flat today\. Hold\./);
+});
+
+test('collectDigestData degrades the portfolio section alone when advice generation fails', async () => {
+  const { collectDigestData } = await import('./aggregator');
+  const { addHolding } = await import('../portfolio/service');
+
+  // A user with a holding reaches the provider, which this file has stubbed
+  // to throw — the section must carry the error while the rest still fills in.
+  const { createUser, setProvider, completeSetup } = await import('../users/service');
+  const { encrypt } = await import('../users/crypto');
+  const holder = await createUser('test-digest-holder-chat');
+  await setProvider(holder.id, 'gemini');
+  await completeSetup(holder.id, encrypt('fake-key-for-tests'), true);
+  await addHolding(holder.id, {
+    symbol: 'AAPL',
+    name: 'Apple Inc.',
+    quantity: 5,
+    asset_class: 'stocks_us',
+    currency: 'USD',
+    market: 'NASDAQ',
+  });
+
+  const data = await collectDigestData(holder.id);
+
+  assert.ok(
+    typeof data.portfolio === 'object' && 'error' in data.portfolio,
+    'portfolio section should have degraded to an error',
+  );
+  assert.ok('total' in (data.spending as object), 'spending should be unaffected');
+  assert.ok(Array.isArray(data.budgetStatuses), 'budgets should be unaffected');
 });
 
 test('formatDigestMessage renders a failed section as unavailable with its reason', async () => {
@@ -147,7 +194,7 @@ test('formatDigestMessage renders a failed section as unavailable with its reaso
     spending: { error: 'db locked' },
     recurringFired: [],
     budgetStatuses: [],
-    portfolio: { error: 'not yet implemented' },
+    portfolio: { error: 'price fetch failed' },
   };
 
   const message = formatDigestMessage(data as any, 'All good.');
@@ -172,7 +219,7 @@ test('generateSummaryLine falls back to "Watch {category} spending." when a budg
         days_left_in_month: 2,
       },
     ],
-    portfolio: { error: 'not yet implemented' },
+    portfolio: { error: 'price fetch failed' },
   };
 
   const line = await generateSummaryLine(userId, data as any);
@@ -186,7 +233,7 @@ test('generateSummaryLine falls back to "All good." when no budget is over thres
     spending: emptySpending(),
     recurringFired: [],
     budgetStatuses: [],
-    portfolio: { error: 'not yet implemented' },
+    portfolio: { error: 'price fetch failed' },
   };
 
   const line = await generateSummaryLine(userId, data as any);
@@ -211,9 +258,12 @@ test('triggerDigestNow sends each approved user their own digest on their own ch
 
   await triggerDigestNow(fakeBot);
 
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].chatId, digestChatId);
-  assert.match(sent[0].text, /Daily Digest/);
+  // Assert on this user's own delivery rather than a total count — other
+  // tests in this file add approved users, and each of them is also due a
+  // digest of their own.
+  const mine = sent.filter((message) => message.chatId === digestChatId);
+  assert.equal(mine.length, 1);
+  assert.match(mine[0].text, /Daily Digest/);
 });
 
 test('triggerDigestNow skips users who are not approved', async () => {

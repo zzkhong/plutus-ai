@@ -64,7 +64,12 @@ function formatBudgetSection(section: DigestData['budgetStatuses']): string | nu
 }
 
 function formatPortfolioSection(section: DigestData['portfolio']): string {
-  return `Portfolio: unavailable (${section.error})`;
+  if (isError(section)) {
+    return `Portfolio: unavailable (${section.error})`;
+  }
+
+  return `Portfolio:
+${section}`;
 }
 
 export function formatDigestMessage(data: DigestData, summaryLine: string): string {

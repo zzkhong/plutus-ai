@@ -38,9 +38,10 @@ below for the full list.
   evenly among 3" or "Alice had the burger, I had the salad" — the bot
   extracts line items, computes each person's share (tax/tip applied
   proportionally), and can log your own share as an expense.
-- **Daily digest** — an AI-written summary of the day's spending, sent
-  every night at 10pm Asia/Singapore (also available on demand via
-  `/digest`).
+- **Daily digest** — an AI-written summary of the day's spending plus a
+  market take on your portfolio (what today's news means for your actual
+  holdings, and a hold/trim/rebalance lean), sent every night at 10pm
+  Asia/Singapore (also available on demand via `/digest`).
 - **Corrections** — "actually that was $12 not $10" retroactively edits
   your most recent transaction.
 

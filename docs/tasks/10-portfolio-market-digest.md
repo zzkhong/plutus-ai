@@ -44,27 +44,38 @@ here.
 
 ---
 
+## Status
+
+**Implemented.** `generatePortfolioAdvice` lives in
+[src/portfolio/advice.ts](../../src/portfolio/advice.ts) and is wired into
+`collectDigestData` behind the same `settle()` used by every other section.
+Grounding is expressed on the provider interface as `generateGroundedText`,
+which returns `{ text, grounded }` — Gemini attempts Google Search
+grounding and falls back to an ungrounded call, reporting `grounded:false`
+so the caller appends the caveat. Slice 2's OpenAI/Anthropic providers only
+need to implement that one method.
+
 ## Acceptance Criteria
 
-- [ ] The nightly digest's portfolio section, for a user with holdings
+- [x] The nightly digest's portfolio section, for a user with holdings
       on file, shows: an overall portfolio-level take on how today's
       market news affects it, call-outs for specific holdings with
       notable news, and a hold/trim/rebalance lean
-- [ ] The advice prompt is built from the user's *already-computed*
+- [x] The advice prompt is built from the user's *already-computed*
       `PortfolioSummary` (net worth, allocation, and each holding's
       real fetched price/`change_pct` from `getPortfolioSummary()`) —
       the LLM reasons about news impact on real numbers, it does not
       invent prices
-- [ ] A user with no holdings on file gets a friendly "send a
+- [x] A user with no holdings on file gets a friendly "send a
       statement to get started" line in that section, not an error
-- [ ] A failed/timed-out advice generation degrades to a short error
+- [x] A failed/timed-out advice generation degrades to a short error
       line for that section only — the rest of the digest still sends
       (same `SectionResult`/`settle()` pattern already used for
       spending/budget/recurring)
-- [ ] When the user's LLM provider doesn't support web-search/grounding,
+- [x] When the user's LLM provider doesn't support web-search/grounding,
       advice still generates from the model's training data with an
       explicit caveat line, rather than skipping the section
-- [ ] Advice generation is fully scoped per user — user A's digest
+- [x] Advice generation is fully scoped per user — user A's digest
       section never reflects user B's holdings, and vice versa
 
 ---
