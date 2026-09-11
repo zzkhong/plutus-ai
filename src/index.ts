@@ -5,7 +5,9 @@
 
 import { logger } from './utils/logger';
 import { config } from './config';
-import { db } from './db';
+// Side-effect import: evaluating ./db opens the SQLite file and runs
+// migrations. Nothing here uses the exported handle directly.
+import './db';
 import { PlutoBot } from './bot';
 import { startRecurringScheduler, triggerRecurringNow } from './scheduler/recurring';
 import { startDigestScheduler } from './digest';

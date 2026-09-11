@@ -19,6 +19,7 @@ import { handleDigestCommand } from './commands/digest';
 import { handleHelpCommand } from './commands/help';
 import { handleSetupCommand, handleSetupTextMessage } from './commands/setup';
 import { handleApproveCommand, handleRejectCommand } from './commands/approve';
+import { handleWebhookKeyCommand } from './commands/webhookkey';
 import { handleTextMessage } from './handlers/text';
 import { handleVoiceMessage } from './handlers/voice';
 import { handleDocumentMessage } from './handlers/document';
@@ -142,6 +143,19 @@ export class PlutoBot {
       await this.replyWithText(ctx, response);
     });
 
+    this.bot.command('webhookkey', async (ctx) => {
+      if (!ctx.user) return;
+      const response = await handleWebhookKeyCommand(ctx.user);
+      await this.replyWithText(ctx, response);
+    });
+
+    // Registered before the message:text catch-all below: grammy runs
+    // handlers in registration order, and that handler consumes every text
+    // message (a /start command included) without calling next().
+    this.bot.command('start', async (ctx) => {
+      await this.replyWithText(ctx, formatHelpMessage());
+    });
+
     this.bot.on('message:text', async (ctx) => {
       if (!ctx.user) {
         return; // authMiddleware already replied for unregistered/pending chats
@@ -224,10 +238,6 @@ export class PlutoBot {
       await this.replyWithText(ctx, reply);
     });
 
-    this.bot.command('start', async (ctx) => {
-      await this.replyWithText(ctx, formatHelpMessage());
-    });
-
     await this.bot.start({
       drop_pending_updates: true,
     });
@@ -244,5 +254,3 @@ export class PlutoBot {
     return this.bot;
   }
 }
-
-export const bot = new PlutoBot();
