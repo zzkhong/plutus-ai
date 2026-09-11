@@ -25,44 +25,54 @@ in this task.
 
 ---
 
+## Status
+
+**Slice 1 (Gemini-only multi-user core) is implemented and tested** — see
+[2026-09-09-multi-user-core-slice-design.md](../superpowers/specs/2026-09-09-multi-user-core-slice-design.md).
+Every criterion below is met with a provider set of one. Slice 2 —
+`src/llm/openai.ts`, `src/llm/anthropic.ts`, and widening `/setup`'s
+accepted provider names — is still outstanding and requires no changes to
+auth, onboarding state, persistence, or any service signature.
+
 ## Acceptance Criteria
 
-- [ ] A `users` table exists; every existing per-transaction table
+- [x] A `users` table exists; every existing per-transaction table
       (`transactions`, `holdings`, `budgets`, `budget_alerts`,
       `recurring_transactions`) has a `user_id` FK scoping every row
-- [ ] `expense/service.ts` is migrated off its own raw
+- [x] `expense/service.ts` is migrated off its own raw
       `better-sqlite3` connection onto the Drizzle schema/client — one
       persistence path, not two
-- [ ] `/setup` walks a new chat through: pick provider → paste API key
+- [x] `/setup` walks a new chat through: pick provider → paste API key
       → live-validate the key against that provider → pending admin
-      approval
-- [ ] The bot best-effort deletes the user's raw API-key message
+      approval *(slice 1 accepts `gemini` only; OpenAI/Anthropic are
+      slice 2 — see the slice design doc)*
+- [x] The bot best-effort deletes the user's raw API-key message
       right after processing it
-- [ ] `ADMIN_CHAT_ID`'s completed `/setup` is auto-approved as
+- [x] `ADMIN_CHAT_ID`'s completed `/setup` is auto-approved as
       `is_admin=true`, no approval step needed (bootstrap)
-- [ ] Admin can `/approve <chat_id>` or `/reject <chat_id>` a pending
+- [x] Admin can `/approve <chat_id>` or `/reject <chat_id>` a pending
       user; the user is notified either way
-- [ ] An already-approved user can re-run `/setup` to rotate their
+- [x] An already-approved user can re-run `/setup` to rotate their
       provider/key without losing approval or needing re-approval
-- [ ] Unregistered / pending-approval chats can't reach any command or
+- [x] Unregistered / pending-approval chats can't reach any command or
       free-text flow except `/setup` and `/help`
-- [ ] `classifyUserMessage`, `inferCategory`, `parseStatement`
+- [x] `classifyUserMessage`, `inferCategory`, `parseStatement`
       (`src/portfolio/statement-parser.ts`), and the digest's
       `generateSummaryLine` all resolve their LLM call through the
       calling user's own stored provider/key, not a global
       `GOOGLE_API_KEY`
-- [ ] All command handlers (`/today`, `/month`, `/budget`, `/export`,
+- [x] All command handlers (`/today`, `/month`, `/budget`, `/export`,
       `/undo`, `/digest`, `/portfolio`) and free-text flows only
       read/write the calling user's own rows
-- [ ] The recurring-transaction cron and the 10pm digest cron run once
+- [x] The recurring-transaction cron and the 10pm digest cron run once
       per approved user (not once globally), each notified on their
       own `telegram_chat_id`
-- [ ] `POST /api/apple-pay` resolves which user owns the `x-api-key`
+- [x] `POST /api/apple-pay` resolves which user owns the `x-api-key`
       header value (`users.webhook_api_key`) and logs against that
       user, instead of checking one global `WEBHOOK_API_KEY`
-- [ ] User A cannot see, undo, correct, or export user B's transactions
+- [x] User A cannot see, undo, correct, or export user B's transactions
       under any code path (covered by tests)
-- [ ] `GOOGLE_API_KEY` and `WEBHOOK_API_KEY` are removed from the env
+- [x] `GOOGLE_API_KEY` and `WEBHOOK_API_KEY` are removed from the env
       schema (no more global LLM key or webhook secret); `ENCRYPTION_KEY`
       and `ADMIN_CHAT_ID` are added
 

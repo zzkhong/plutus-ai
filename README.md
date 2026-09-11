@@ -5,6 +5,12 @@ brokerage/crypto/cash portfolio, splits bills from a receipt photo, sends a
 nightly AI-written digest, and can auto-log Apple Pay transactions from an
 iOS Shortcut.
 
+It is **multi-user with bring-your-own-key**: each person registers through
+the bot with `/setup` and supplies their own Gemini API key, stored
+encrypted at rest. The first chat (`ADMIN_CHAT_ID`) bootstraps as admin and
+approves everyone else. All data — transactions, budgets, holdings — is
+scoped per user.
+
 Message understanding is **Gemini-first with no rule-based fallback** — if
 Gemini can't classify a message, the bot says so rather than guessing with
 keyword matching. Every classified intent is wired to a real action, and
@@ -65,34 +71,30 @@ breakdown if you're picking up work here.
 - A [Telegram bot token](https://core.telegram.org/bots#how-do-i-create-a-bot)
   (optional — everything except the Telegram bot itself, i.e. the webhook
   and schedulers, still runs without one)
-- A [Google Gemini API key](https://aistudio.google.com/apikey) — **required**,
-  there's no fallback classifier
+- A [Google Gemini API key](https://aistudio.google.com/apikey) per user —
+  supplied to the bot during `/setup`, **not** via `.env`
 
 ## Setup
+
+**→ [SETUP.md](SETUP.md) is the full walkthrough**, from clone to your
+first logged expense. The short version:
 
 ```bash
 git clone https://github.com/zzkhong/plutus-ai.git
 cd plutus-ai
 npm install
 cp .env.example .env
+# generate an ENCRYPTION_KEY, set ADMIN_CHAT_ID and TELEGRAM_BOT_TOKEN
+npm run dev
 ```
 
-Edit `.env`:
+Then message your bot `/setup`, reply `gemini`, and paste your Gemini API
+key. As `ADMIN_CHAT_ID` you are approved automatically.
 
-| Variable | Required | Notes |
-|---|---|---|
-| `GOOGLE_API_KEY` | **Yes** | Startup fails without it — every message classification goes through Gemini. |
-| `TELEGRAM_BOT_TOKEN` | No | Without it the bot process still runs (schedulers + webhook), but no Telegram bot starts. |
-| `TELEGRAM_AUTHORIZED_CHAT_ID` | No | Locks the bot to a single chat. Leave unset during setup to discover your chat ID (see below), then set it. |
-| `DATABASE_URL` | No | Defaults to `./data/pluto.db`, created automatically on first run. |
-| `TZ` | Recommended | Set to `Asia/Singapore` so "today" boundaries and the 10pm digest line up correctly. |
-| `WEBHOOK_API_KEY` | No | Only needed for the iOS Shortcuts Apple Pay integration — see [docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md). The webhook server doesn't start without it. |
-| `PORT` | No | Webhook server port, defaults to `3000`. |
-
-To get a Telegram bot token: message [@BotFather](https://t.me/BotFather),
-`/newbot`, follow the prompts. To find your chat ID: start a chat with your
-new bot, send it any message, then check the app logs on startup (or query
-`https://api.telegram.org/bot<TOKEN>/getUpdates`) for `chat.id`.
+Only two things are required in `.env`: `ENCRYPTION_KEY` (always) and
+`ADMIN_CHAT_ID` (whenever `TELEGRAM_BOT_TOKEN` is set). There is no global
+LLM key and no shared webhook secret — both are per-user. See
+[SETUP.md](SETUP.md#3-configure-env) for the full table.
 
 ## Running
 
@@ -108,14 +110,13 @@ scheduler, digest scheduler, and webhook server all coming up.
 For production:
 
 ```bash
-npm run build     # tsc -> dist/
+npm run build     # tsc -> dist/ (and copies db migrations into dist/)
 npm run start     # node dist/index.js
 ```
 
 Drizzle migration commands (`db:generate`, `db:migrate`, `db:studio`) exist
-for schema changes under `src/db/schema.ts` — see
-[CLAUDE.md](CLAUDE.md#two-independent-sqlite-access-paths--read-before-touching-persistence)
-for why the expense module doesn't go through them.
+for schema changes under `src/db/schema.ts`; every module goes through
+Drizzle — see [CLAUDE.md](CLAUDE.md#persistence).
 
 ### Try it
 
@@ -135,18 +136,18 @@ Spent $4.50 at Ya Kun
 ### Testing expense logging directly
 
 Without Telegram, the most direct way to exercise `logExpense` end-to-end
-is the webhook (set `WEBHOOK_API_KEY` in `.env` first):
+is the webhook. Get your personal key from the bot with `/webhookkey`:
 
 ```bash
 curl -X POST http://localhost:3000/api/apple-pay \
   -H "Content-Type: application/json" \
-  -H "x-api-key: $WEBHOOK_API_KEY" \
+  -H "x-api-key: <your /webhookkey value>" \
   -d '{"amount": "12.50", "merchant": "McDonald'"'"'s", "card": "DBS"}'
 ```
 
-This logs a real transaction (category inferred by Gemini) — `/today` in
-Telegram will then show it, and it'll send a Telegram confirmation if
-`TELEGRAM_AUTHORIZED_CHAT_ID` is set.
+This logs a real transaction against your account (category inferred by
+Gemini) — `/today` in Telegram will then show it, and you get a Telegram
+confirmation if the bot is running.
 
 ### iOS Shortcuts (Apple Pay auto-logging)
 
@@ -157,8 +158,9 @@ purchases log themselves.
 ## Automated tests
 
 ```bash
-npm test          # runs the full fixed test list via node's test runner
-npm run lint       # eslint (currently reports pre-existing lint debt, mostly `any` in tests)
+npm test           # runs the full fixed test list via node's test runner
+npm run typecheck  # tsc --noEmit over src, tests included
+npm run lint       # eslint — clean
 ```
 
 Run a single file or filter by name:
@@ -183,22 +185,23 @@ pattern to follow for new tests.
   Line Tools; Linux: `build-essential` + `python3`). Prebuilt binaries cover
   most common Node versions/platforms, so this usually only bites on an
   unusual combination.
-- **Startup throws `Invalid environment configuration`** — `GOOGLE_API_KEY`
-  is missing or empty in `.env`; check `src/config/env.ts` for the full
-  validated schema.
-- **Bot doesn't respond in Telegram** — confirm `TELEGRAM_BOT_TOKEN` is set
-  and, if `TELEGRAM_AUTHORIZED_CHAT_ID` is set, that you're messaging from
-  that exact chat.
+- **Startup throws `Invalid environment configuration`** — `ENCRYPTION_KEY`
+  is missing or not 64 hex characters, or `TELEGRAM_BOT_TOKEN` is set
+  without `ADMIN_CHAT_ID`; check `src/config/env.ts` for the full validated
+  schema.
+- **Bot replies "Run /setup to get started"** — that chat has no user row
+  yet. See [SETUP.md](SETUP.md#5-register-yourself-in-the-bot).
 - **Gemini classification errors** — the model id is pinned in
-  [src/bot/ai.ts](src/bot/ai.ts); if it starts failing outright, check
-  `GET /v1beta/models` against your key for deprecation.
+  [src/llm/gemini.ts](src/llm/gemini.ts); if it starts failing outright,
+  check `GET /v1beta/models` against your key for deprecation.
+
+More in [SETUP.md](SETUP.md#troubleshooting).
 
 ## Project layout
 
-See [CLAUDE.md](CLAUDE.md) for full architecture notes (request flow, the
-two SQLite access paths, module-by-module breakdown) and
-[docs/tasks/](docs/tasks/) for the module-by-module build plan this project
-was implemented against.
+See [CLAUDE.md](CLAUDE.md) for full architecture notes (request flow,
+persistence, module-by-module breakdown) and [docs/tasks/](docs/tasks/) for
+the build plan this project was implemented against.
 
 ## License
 

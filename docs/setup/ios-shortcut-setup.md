@@ -4,17 +4,21 @@ This sets up an iOS Shortcuts automation that fires every time you pay with
 Apple Pay, sends the transaction to Pluto AI's webhook, and logs it
 automatically — no manual entry.
 
-## 1. Configure the webhook
+## 1. Get your webhook key
 
-1. In `.env`, set a secret value for `WEBHOOK_API_KEY` (any long random
-   string works — see `.env.example`).
-2. Start the app (`npm run dev` or `npm start`). On boot you should see:
+The webhook is **per-user** — there is no shared secret in `.env`. Every
+approved user gets their own key when they finish `/setup`, and requests
+signed with it log against that user's account.
+
+1. Finish onboarding in the bot if you haven't — see
+   [SETUP.md](../../SETUP.md).
+2. Send **`/webhookkey`** to the bot. It replies with your key. Treat it
+   like a password: anyone holding it can log expenses as you.
+3. Start the app (`npm run dev` or `npm start`). On boot you should see:
    ```
    Webhook server listening on port 3000
    ```
-   If instead you see `Webhook server not started: WEBHOOK_API_KEY is not
-   configured`, the endpoint is disabled — fix `.env` and restart.
-3. Confirm it's reachable locally:
+4. Confirm it's reachable locally:
    ```
    curl http://localhost:3000/api/health
    # {"status":"ok"}
@@ -25,7 +29,7 @@ automatically — no manual entry.
 This uses a **quick tunnel** — no Cloudflare account or domain required.
 The tradeoff: the public URL is random and changes every time you restart
 the tunnel, so you'll need to re-paste it into the Shortcut when that
-happens. That's an acceptable tradeoff for a single-user personal tool; a
+happens. That's an acceptable tradeoff for a small personal deployment; a
 named tunnel (stable URL, needs a Cloudflare account + domain) is a
 possible future upgrade.
 
@@ -66,14 +70,14 @@ Add these actions, in order:
    - Method: `POST`
    - Headers:
      - `Content-Type`: `application/json`
-     - `x-api-key`: the same value as `WEBHOOK_API_KEY` in `.env`
+     - `x-api-key`: the key `/webhookkey` gave you
    - Request Body: **JSON**, with fields:
      - `amount`: the transaction amount (from the Apple Pay automation's
        "Transaction Amount" magic variable)
      - `merchant`: the transaction merchant (from "Transaction Merchant")
      - `card`: the card used (from "Transaction Card" — this determines the
        currency via the card→currency mapping in
-       [src/config/currencies.ts](../src/config/currencies.ts))
+       [src/config/currencies.ts](../../src/config/currencies.ts))
 3. **If** (Get Contents of URL fails / errors)
    - **Show Notification**: "Pluto: Failed to log. Tell bot manually."
 
@@ -92,11 +96,14 @@ changes. When that happens:
 
 ## Troubleshooting
 
-- **No Telegram confirmation, but the shortcut didn't show an error**: check
-  `TELEGRAM_AUTHORIZED_CHAT_ID` is set in `.env` — the transaction is still
-  logged even if the confirmation can't be sent (check `/today` in the bot).
-- **401 from the webhook**: `x-api-key` header doesn't match
-  `WEBHOOK_API_KEY` in `.env`.
+- **No Telegram confirmation, but the shortcut didn't show an error**: the
+  confirmation is sent to the chat that owns the key, and only when the
+  Telegram bot is running (`TELEGRAM_BOT_TOKEN` set). The transaction is
+  logged either way — check `/today` in the bot.
+- **401 from the webhook**: the `x-api-key` header doesn't match any user's
+  key. Re-check with `/webhookkey`.
+- **403 from the webhook**: the key is valid but your account isn't
+  approved yet — ask the admin to `/approve` you.
 - **Webhook unreachable from outside**: confirm the `cloudflared` process is
   still running and the URL in the Shortcut matches what it's currently
   printing.
