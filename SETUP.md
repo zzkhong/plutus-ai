@@ -21,7 +21,7 @@ pieces fit together.
 | Where | Vercel (free Hobby plan) | Your machine |
 | Database | Turso (free), Tokyo | A SQLite file in `./data/` |
 | Telegram | Telegram pushes updates to a webhook | The process polls Telegram |
-| Daily jobs | Vercel Cron | Built-in scheduler |
+| Scheduled jobs | Vercel Cron | Built-in scheduler |
 | Command | `git push` | `npm run dev` |
 
 **Use two Telegram bots**, one for production and one for development. A bot
@@ -83,7 +83,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 |---|---|
 | `ENCRYPTION_KEY` | Encrypting users' API keys in the database |
 | `TELEGRAM_WEBHOOK_SECRET` | Proving webhook requests really come from Telegram |
-| `CRON_SECRET` | Proving the daily-job requests really come from Vercel Cron |
+| `CRON_SECRET` | Proving the scheduled-job requests really come from Vercel Cron |
 
 > **Keep `ENCRYPTION_KEY` safe.** If it changes, every stored API key becomes
 > unreadable and everyone has to run `/setup` again. Store all three in a
@@ -99,7 +99,9 @@ a key, conversions use fixed built-in rates.
 1. In Vercel: **Add New → Project**, and import your `plutus-ai` GitHub repo.
 2. Leave the framework and build settings as detected. Vercel recognises the
    Hono app in `src/app.ts`, and [`vercel.json`](vercel.json) supplies the
-   build command, the Tokyo region (`hnd1`) and the two daily jobs.
+   build command, the Tokyo region (`hnd1`) and the three scheduled jobs: the
+   recurring charges at midnight, the digest at 10pm, and the month review at
+   9am on the 1st.
 3. Under **Environment Variables**, add these for the **Production**
    environment only:
 
@@ -112,7 +114,7 @@ a key, conversions use fixed built-in rates.
 | `ADMIN_CHAT_ID` | Your chat ID |
 | `TELEGRAM_WEBHOOK_SECRET` | From 2.2 |
 | `CRON_SECRET` | From 2.2 |
-| `EXCHANGE_RATE_API_KEY` | Your exchangerate-api.com key (see below) |
+| `EXCHANGE_RATE_API_KEY` | Your exchangerate-api.com key |
 | `APP_TIMEZONE` | Optional, defaults to `Asia/Singapore` |
 
 Leave Preview unticked. Builds for other branches then skip database
@@ -150,6 +152,11 @@ You should see `Webhook set: https://plutus-ai.vercel.app/api/telegram`.
 `npm run telegram:webhook -- info` shows the current registration and, if
 deliveries are failing, Telegram's `last_error_message`.
 
+This registers both messages and **button presses** (the Change category and
+Undo buttons). Telegram only delivers the kinds of update a webhook was
+registered for, so if you set yours up before the buttons existed, run `set`
+again.
+
 ### 2.5 Register yourself
 
 In Telegram, open your **production** bot and:
@@ -165,12 +172,24 @@ Then try it:
 ```
 /help
 Spent $4.50 at Ya Kun
-/today
+Grab 18 yesterday
 Set food budget to $500/month
 /budget
 ```
 
+Tap **Change category** under one of the replies to check the buttons work.
+
 That's it, you're live. From now on, deploying is just `git push` to `main`.
+
+### Updating an existing deployment
+
+Push to `main` and Vercel builds, migrates Turso, then switches traffic over.
+New tables and columns are added by the build, with your data kept.
+After this update in particular:
+
+- Run **`npm run telegram:webhook -- set <your domain>`** once (step 2.4), so
+  Telegram starts delivering button presses.
+- Vercel picks up the new month-review job from `vercel.json` by itself.
 
 ## 3. Local development
 
@@ -205,6 +224,7 @@ The database file and tables are created on first run. You should see:
 [INFO] Database ready
 [INFO] Recurring transactions scheduler started (runs daily at 00:00 Asia/Singapore)
 [INFO] Daily digest scheduler started (runs daily at 22:00 Asia/Singapore)
+[INFO] Month review scheduler started (runs at 09:00 on the 1st, Asia/Singapore)
 [INFO] HTTP server listening on port 3000
 [INFO] Telegram bot started (long polling)
 ```
@@ -233,16 +253,16 @@ npm run build && npm start   # run the compiled standalone process
    either way.
 
 Until approved, a user can only use `/setup` and `/help`. Everyone's
-transactions, budgets and holdings are private to them. Rejecting someone
-deletes all of their data.
+transactions, income, budgets and holdings are private to them. Rejecting
+someone deletes all of their data.
 
 ## 5. Importing your portfolio
 
-Send the bot a statement from your broker **as a file** — tap the paperclip
-and choose File, not Photo (photos go to `/split`). Any broker works, and so
-does any layout: a PDF statement, a screenshot of your positions screen, or a
-CSV export. The bot reads it with your own Gemini key and replies with what
-it imported:
+Send the bot a statement from your broker **as a file**: tap the paperclip
+and choose File, not Photo (a photo is read as a receipt). Any broker works,
+and so does any layout: a PDF statement, a screenshot of your positions
+screen, or a CSV export. The bot reads it with your own Gemini key and
+replies with what it imported:
 
 ```
 Updated your IBKR holdings: 10 positions at the statement's prices from 10 Sep 2026.
@@ -318,29 +338,35 @@ drop-and-recreate, which loses that column's data.
   written per month. A personal bot uses a tiny fraction of that.
 - **exchangerate-api.com free:** 1,500 requests a month. Rates are cached
   for a day in the database, so the app uses about 30.
-- **Vercel Hobby:** for personal, non-commercial use. Its scheduled jobs run
-  once a day at some point within the scheduled hour, so the 22:00 digest
-  arrives between 22:00 and 22:59.
+- **Vercel Hobby:** for personal, non-commercial use. Scheduled jobs run once
+  at some point within the scheduled hour, so the 22:00 digest arrives between
+  22:00 and 22:59, and the month review between 09:00 and 09:59 on the 1st.
+- **Gemini free tier:** rate-limited per key. Plutus makes one call per chat
+  message or voice note, none to categorize a merchant a user has logged
+  before, and one per receipt photo.
 
 ## Command reference
 
 | Command | What it does |
 |---|---|
 | `/setup` | Register, or rotate your LLM API key |
-| `/today` / `/month` | Spending summary |
-| `/budget` | Budget status per category |
+| `/today` / `/month` | Spending summary; `/month` adds income and savings rate |
+| `/budget` | Each budget this month, and where it's heading |
+| `/recent` | Last 10 expenses, to change or delete |
+| `/undo` | Undo your last transaction |
+| `/review` | Last month in review |
 | `/portfolio` | Net worth and allocation |
 | `/split` | Split a bill from a receipt photo (`/cancel` aborts) |
 | `/digest` | Preview tonight's digest |
 | `/export` | Get this year's transactions as a CSV file |
-| `/undo` | Undo your last transaction |
 | `/webhookkey` | Show your iOS Shortcut webhook key |
 | `/approve <chat_id>` / `/reject <chat_id>` | Admin only |
 | `/help` | Command list |
 
-You can also just talk to it: *"Spent $4.50 at Ya Kun"*, *"How much did I
-spend on food?"*, *"Netflix $15.98 every 5th"*, *"I hold 0.5 BTC"*, or send a
-voice note saying any of those.
+You can also just talk to it: *"Spent $4.50 at Ya Kun"*, *"Grab 18
+yesterday"*, *"Salary $5200 came in"*, *"How much did I spend on food?"*,
+*"Monthly budget $3000"*, *"Netflix $15.98 every 5th"*, *"I hold 0.5 BTC"*,
+send a voice note saying any of those, or send a photo of a receipt.
 
 ## Troubleshooting
 
@@ -355,14 +381,20 @@ Run `npm run telegram:webhook -- info` with the production token. Then:
   Vercel. Add it, then redeploy, because environment changes only apply to new
   deployments.
 
+**The buttons do nothing (they just spin).**
+The webhook was registered without button presses. Run
+`npm run telegram:webhook -- set <your domain>` again. `info` should list
+`callback_query` under `allowed_updates`.
+
 **The Vercel build fails with `Invalid environment configuration`.**
 A required variable is missing or malformed for Production. The build log names
 it: usually `ENCRYPTION_KEY` (must be 64 hex characters) or
 `DATABASE_AUTH_TOKEN` (required for a `libsql://` URL).
 
-**No nightly digest.**
+**No nightly digest or month review.**
 Check Vercel's **Cron Jobs** tab. A `503` there means `CRON_SECRET` isn't set.
-On Hobby the digest can arrive any time between 22:00 and 22:59.
+On Hobby a job can arrive any time within its hour. The month review skips
+anyone with nothing logged last month.
 
 **"Run /setup to get started" to everything.**
 That chat isn't registered yet. If you expected to be admin, check that
@@ -374,6 +406,10 @@ The admin needs to `/approve <your chat_id>`.
 **"That key didn't work — the provider rejected it".**
 Check the key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 The free tier is rate-limited, so a heavily used key can fail validation.
+
+**"I couldn't read a receipt total…"**
+The photo wasn't clear enough, wasn't a receipt, or was in a currency other
+than SGD, MYR or USD. Try a flatter, better-lit shot, or type the expense.
 
 **"I couldn't read that statement".**
 The reply says why. Make sure you sent it as a file, not a photo. If a

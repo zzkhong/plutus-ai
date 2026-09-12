@@ -6,13 +6,13 @@ Plutus AI is one TypeScript codebase that runs in two ways:
 |---|---|---|
 | Entrypoint | [`src/app.ts`](../src/app.ts), default-exports the Hono app | [`src/standalone.ts`](../src/standalone.ts), one long-running Node process |
 | Telegram updates | Telegram **pushes** them to `POST /api/telegram` (webhook) | The process **long-polls** Telegram |
-| Daily jobs | **Vercel Cron** calls `GET /api/cron/recurring` and `/api/cron/digest` | **node-cron** inside the process |
+| Scheduled jobs | **Vercel Cron** calls `GET /api/cron/recurring`, `/digest` and `/review` | **node-cron** inside the process |
 | Database | **Turso** (hosted libSQL), Tokyo | A local SQLite **file** (`file:./data/pluto.db`) |
 | Migrations | During the Vercel build (`npm run vercel-build`) | On process startup |
 | Apple Pay URL | `https://<project>.vercel.app/api/apple-pay` | `http://localhost:3000/api/apple-pay` (tunnel it to reach it from a phone) |
 
 Both modes share every handler, service and query. The only differences are how
-updates arrive and what triggers the daily jobs.
+updates arrive and what triggers the scheduled jobs.
 
 ## Production: Vercel + Turso
 
@@ -27,10 +27,10 @@ flowchart LR
 
     subgraph vercel["Vercel Hobby, region hnd1 (Tokyo)"]
         direction TB
-        cron["Vercel Cron<br/>14:00 and 16:00 UTC daily"]
+        cron["Vercel Cron<br/>daily 14:00 and 16:00 UTC,<br/>01:00 UTC on the 1st"]
         rtg["POST /api/telegram"]
         rap["POST /api/apple-pay"]
-        rcron["GET /api/cron/recurring<br/>GET /api/cron/digest"]
+        rcron["GET /api/cron/recurring<br/>GET /api/cron/digest<br/>GET /api/cron/review"]
         app["Hono app (src/app.ts)<br/>one Vercel Function"]
         rtg --> app
         rap --> app
@@ -43,12 +43,12 @@ flowchart LR
     prices["CoinGecko<br/>crypto prices"]
     fxapi["exchangerate-api.com<br/>SGD rates"]
 
-    tg -- "text, voice, photos, PDFs" --> tgapi
+    tg -- "text, voice, photos, files, button presses" --> tgapi
     tgapi -- "webhook + secret header" --> rtg
     ios -- "HTTPS + the user's x-api-key" --> rap
-    app -- "replies and file downloads" --> tgapi
+    app -- "replies, message edits, file downloads" --> tgapi
     app -- "SQL over HTTPS" --> turso
-    app -- "classify, categorize, transcribe, advise" --> gemini
+    app -- "classify, read receipts, transcribe, advise" --> gemini
     app -- "crypto prices" --> prices
     app -- "exchange rates, cached a day" --> fxapi
 ```
@@ -66,7 +66,7 @@ flowchart LR
     subgraph proc["npm run dev (src/standalone.ts)"]
         direction TB
         poll["grammy long polling"]
-        crons["node-cron<br/>00:00 recurring, 22:00 digest"]
+        crons["node-cron<br/>00:00 recurring, 22:00 digest,<br/>09:00 on the 1st review"]
         http["HTTP server :3000<br/>/api/apple-pay, /api/health"]
     end
     poll -- "getUpdates" --> tgapi
@@ -89,20 +89,45 @@ sequenceDiagram
     participant DB as Turso
     participant G as Gemini (your key)
 
-    U->>T: "Spent $4.50 at Ya Kun"
+    U->>T: "Grab 18 yesterday"
     T->>F: POST /api/telegram with secret header
     F->>F: Check secret, bot.init() once per instance
     F-->>T: 200 OK, acknowledged immediately
     Note over F: The rest runs in waitUntil, so a slow Gemini call<br/>can't make Telegram time out and redeliver
     F->>DB: authMiddleware, find user by chat_id
-    F->>G: classifyUserMessage, intent = expense
-    F->>G: inferCategory, category = Food
-    F->>DB: Insert transaction (integer SGD cents)
-    F->>T: sendMessage("Logged S$4.50 ...")
-    T->>U: Reply
+    F->>G: classifyUserMessage (with today's date)<br/>intent = expense, category = Transport, date = yesterday
+    F->>DB: Your last category for "Grab", if any
+    Note over F: Your history wins, then the classifier's category —<br/>no second Gemini call to categorize
+    F->>DB: Insert transaction (integer SGD cents, spent_at = yesterday)
+    F->>DB: Budget alerts for Transport and Overall
+    F->>T: sendMessage("Logged S$18.00 ...", [Change category] [Undo])
+    T->>U: Reply with buttons
 ```
 
-## The nightly digest
+## A button press
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as You (Telegram)
+    participant T as Telegram Bot API
+    participant F as Vercel Function
+    participant DB as Turso
+
+    U->>T: Tap "Change category", then "Food"
+    T->>F: callback_query, data "t:s:c:<transaction id>:Food"
+    F->>DB: Update that transaction, scoped to your user id
+    F->>DB: Budget alerts for the new category
+    F->>T: answerCallbackQuery("Moved to Food") + editMessageText
+    T->>U: The same message, updated
+```
+
+The buttons carry the transaction id, so no function instance has to remember
+what a message was about. Replying to a message with buttons works the same
+way: Telegram includes the replied-to message's buttons, and the correction
+goes to that transaction.
+
+## The scheduled jobs
 
 ```mermaid
 sequenceDiagram
@@ -122,7 +147,17 @@ sequenceDiagram
         F->>T: sendMessage(that user's chat)
     end
     F-->>C: 200
+
+    C->>F: GET /api/cron/review on the 1st (Bearer CRON_SECRET)
+    loop Each approved user with last month logged
+        F->>DB: Last month and the month before, income, budgets
+        F->>T: sendMessage(the month in review), no LLM call
+    end
+    F-->>C: 200
 ```
+
+The recurring-charge job (`/api/cron/recurring`, midnight) works the same way:
+it logs each due charge once, then pushes any budget alert it triggers.
 
 ## Code map
 
@@ -142,12 +177,15 @@ flowchart TB
     subgraph botmod["src/bot: Telegram"]
         mw["middleware/auth.ts<br/>chat_id to users row"]
         cmds["commands/*"]
-        hnd["handlers: text, voice, document"]
+        hnd["handlers: text, voice, document,<br/>receipt, callback"]
+        kb["keyboards.ts<br/>buttons and callback data"]
     end
 
     subgraph domain["Domain services, all scoped by userId"]
         exp["expense"]
+        inc["income"]
         bud["budget"]
+        rev["review"]
         port["portfolio"]
         spl["split"]
         dig["digest"]
@@ -166,6 +204,7 @@ flowchart TB
     rtel --> botmod
     rcr --> sch
     rcr --> dig
+    rcr --> rev
     rapp --> exp
     botmod --> domain
     domain --> llm
@@ -179,11 +218,12 @@ flowchart TB
 ```mermaid
 erDiagram
     users ||--o{ transactions : owns
+    users ||--o{ income : owns
     users ||--o{ budgets : owns
     users ||--o{ budget_alerts : owns
     users ||--o{ holdings : owns
     users ||--o{ recurring_transactions : owns
-    budgets ||--o{ budget_alerts : "fires at 80 and 100 percent"
+    budgets ||--o{ budget_alerts : "80%, 100% and pace, once a month each"
     recurring_transactions ||--o{ transactions : "logs, via recurring_id"
 
     users {
@@ -202,8 +242,24 @@ erDiagram
         integer amount_sgd "cents, normalized"
         text merchant
         text category
-        text source "text, voice, apple_pay, recurring, split"
+        text source "text, voice, receipt, apple_pay, recurring, split"
         text recurring_id "idempotency key for the daily job"
+        integer spent_at "when the money went; totals use this"
+        integer created_at "when it was logged; latest uses this"
+    }
+    income {
+        text id PK
+        text user_id FK
+        integer amount "cents, original currency"
+        integer amount_sgd "cents, normalized"
+        text source "e.g. Salary"
+        integer received_at
+    }
+    budgets {
+        text id PK
+        text user_id FK
+        text category "a category, or Overall"
+        integer amount_sgd "cents, monthly"
     }
     split_sessions {
         text chat_id PK
@@ -237,22 +293,39 @@ clears it along with the user's other rows.
   secret isn't configured, rather than running unauthenticated. Otherwise a
   forged update could `/approve` a stranger, and anyone could trigger a digest
   to every user.
+- **Button data is untrusted.** A button's callback data comes back from the
+  client, so every action it triggers looks the transaction up by id *and* the
+  pressing user's id. A forged id for someone else's expense finds nothing.
+- **An expense has two times.** `spent_at` is when the money was spent
+  ("yesterday", a receipt's date); totals, budgets and the review use it.
+  `created_at` is when it was logged; `/undo` and `/recent` use that. Queries
+  read `coalesce(spent_at, created_at)`, because the build migrates the
+  database while the previous deployment is still logging rows without
+  `spent_at`.
+- **Categorizing is cheap.** A merchant the user has logged before takes its
+  last category (corrections included) with no LLM call; a new one takes the
+  category the classifier already worked out. So a chat expense costs one
+  Gemini call, and a known Apple Pay merchant none.
 - **Foreign keys are not relied on.** SQLite only enforces them per
   connection, and Turso's remote sessions aren't pinned to one connection. The
   schema still declares `ON DELETE CASCADE`, but `reject()` and
   `removeBudget()` delete child rows explicitly, in one atomic `batch`.
 - **Nothing lives in process memory between requests.** On Vercel, consecutive
   messages can reach different function instances, so the `/split`
-  conversation is stored in `split_sessions`. It expires after two idle hours,
-  because while a split is active it captures every text message. The price
-  cache stays in memory and just gets rebuilt.
-- **The daily jobs are idempotent.** The recurring job skips any charge whose
-  `recurring_id` was already logged today. A cron call can arrive twice, and
-  the standalone process runs the job both at startup and at midnight.
+  conversation is stored in `split_sessions`, and buttons carry their own
+  context. A split expires after two idle hours, because while it's active it
+  captures every text message and photo. The price cache stays in memory and
+  just gets rebuilt.
+- **The scheduled jobs are idempotent where it matters.** The recurring job
+  skips any charge whose `recurring_id` was already logged today, because a
+  cron call can arrive twice and the standalone process runs the job both at
+  startup and at midnight. A duplicated digest or review is only a repeated
+  message, so those aren't deduplicated.
 - **The timezone is pinned in code.** Vercel reserves `TZ` and runs in UTC, so
   the config sets `process.env.TZ = APP_TIMEZONE` before any date math. The
-  Vercel Cron schedules are UTC: `0 14 * * *` = 22:00 SGT digest, and
-  `0 16 * * *` = 00:00 SGT recurring charges.
+  Vercel Cron schedules are UTC: `0 14 * * *` = 22:00 SGT digest,
+  `0 16 * * *` = 00:00 SGT recurring charges, `0 1 1 * *` = 09:00 SGT on the
+  1st for the month review.
 - **Migrations run at build time, never on preview builds.** A deploy migrates
   Turso before the new code serves traffic. A preview branch can't apply an
   unreviewed schema change to production data.
