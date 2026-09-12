@@ -81,6 +81,7 @@ export async function getCryptoPrice(symbol: string): Promise<PriceQuote | null>
       currency: 'USD' as Currency,
       change_pct: typeof entry.usd_24h_change === 'number' ? entry.usd_24h_change : 0,
       as_of: new Date(),
+      source: 'market',
     };
   } catch {
     return null;

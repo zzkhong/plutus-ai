@@ -20,6 +20,8 @@ function mapHoldingRow(row: typeof holdings.$inferSelect): Holding {
     market: row.market,
     broker: (row.broker as Broker | null) ?? null,
     cost_basis: row.cost_basis ?? undefined,
+    price: row.price ?? null,
+    price_as_of: row.price_as_of ? new Date(row.price_as_of) : null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
   };
@@ -122,6 +124,7 @@ export async function replaceHoldingsForBroker(
   userId: string,
   broker: Broker,
   parsed: ParsedHolding[],
+  asOf: Date = new Date(),
 ): Promise<Holding[]> {
   if (parsed.length === 0) {
     throw new Error(
@@ -141,6 +144,8 @@ export async function replaceHoldingsForBroker(
     currency: h.currency,
     market: h.market,
     broker,
+    price: h.price ?? null,
+    price_as_of: asOf.getTime(),
     created_at: now,
     updated_at: now,
   }));

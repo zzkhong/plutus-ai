@@ -1,12 +1,16 @@
 /**
- * Unified price fetching across asset classes, with a short in-memory TTL
- * cache. There's no DB-backed cache; on Vercel the cache lives only as long
- * as a function instance, which just means refetching.
+ * Prices for valuing holdings.
+ *
+ * - Stocks and ETFs are valued at the price on the user's latest statement
+ *   from that broker, stored on the holding at import. There's no live stock
+ *   quote; a newer statement replaces the price.
+ * - Crypto is priced live from CoinGecko, with a short in-memory TTL cache
+ *   (per function instance on Vercel, which just means refetching).
+ * - Cash has no price; it's valued at face value.
  */
 
 import { Holding, PriceQuote } from '../types';
 import { getCryptoPrice } from './crypto';
-import { getStockPrice } from './stocks';
 
 interface CacheEntry {
   quote: PriceQuote;
@@ -15,13 +19,11 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-const STOCK_TTL_MS = 15 * 60 * 1000;
 const CRYPTO_TTL_MS = 5 * 60 * 1000;
 
-// Neither getCryptoPrice (CoinGecko) nor getStockPrice (Yahoo Finance) sets a
-// fetch timeout, so a hung network request would otherwise block forever
-// instead of degrading to null like the rest of their "never throw" contract.
-// Bounding it here, once, avoids duplicating timeout logic in both fetchers.
+// getCryptoPrice sets no fetch timeout, so a hung request would otherwise
+// block instead of degrading to null like the rest of its "never throw"
+// contract.
 const FETCH_TIMEOUT_MS = 10_000;
 
 /**
@@ -36,8 +38,17 @@ export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | nul
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-function cacheKey(holding: Holding): string {
-  return `${holding.asset_class}:${holding.symbol}`;
+function statementQuote(holding: Holding): PriceQuote | null {
+  if (holding.price === null || holding.price === undefined) {
+    return null;
+  }
+  return {
+    price: holding.price,
+    currency: holding.currency,
+    change_pct: null,
+    as_of: holding.price_as_of ?? holding.updated_at,
+    source: 'statement',
+  };
 }
 
 export async function getPrice(holding: Holding): Promise<PriceQuote | null> {
@@ -45,27 +56,20 @@ export async function getPrice(holding: Holding): Promise<PriceQuote | null> {
     return null;
   }
 
-  const key = cacheKey(holding);
+  if (holding.asset_class !== 'crypto') {
+    return statementQuote(holding);
+  }
+
+  const key = `crypto:${holding.symbol}`;
   const cached = cache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.quote;
   }
 
-  let quote: PriceQuote | null;
-  let ttl: number;
-
-  if (holding.asset_class === 'crypto') {
-    quote = await withTimeout(getCryptoPrice(holding.symbol), FETCH_TIMEOUT_MS);
-    ttl = CRYPTO_TTL_MS;
-  } else {
-    quote = await withTimeout(getStockPrice(holding.symbol, holding.asset_class, holding.currency), FETCH_TIMEOUT_MS);
-    ttl = STOCK_TTL_MS;
-  }
-
+  const quote = await withTimeout(getCryptoPrice(holding.symbol), FETCH_TIMEOUT_MS);
   if (quote) {
-    cache.set(key, { quote, expiresAt: Date.now() + ttl });
+    cache.set(key, { quote, expiresAt: Date.now() + CRYPTO_TTL_MS });
   }
-
   return quote;
 }
 

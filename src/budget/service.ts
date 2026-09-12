@@ -7,6 +7,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { budget_alerts, budgets } from '../db/schema';
 import { toSGD } from '../config';
+import { getExchangeRates } from '../fx/rates';
 import { Category, Currency } from '../types';
 import { Budget } from './types';
 
@@ -29,7 +30,7 @@ export async function setBudget(
   currency: Currency = 'SGD',
 ): Promise<Budget> {
   const amountCents = Math.max(0, Math.round(amount * 100));
-  const amountSgd = toSGD(amountCents, currency);
+  const amountSgd = toSGD(amountCents, currency, await getExchangeRates());
   const now = Date.now();
 
   const existing = await db

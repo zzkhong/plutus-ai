@@ -2,19 +2,32 @@
  * /portfolio command handler
  */
 
-import { getPortfolioSummary } from '../../portfolio';
+import { getPortfolioSummary, EnrichedHolding } from '../../portfolio';
 import { formatCurrency } from '../../config';
+import { formatDay } from '../../utils/dates';
+
+function describePrice(holding: EnrichedHolding): string {
+  if (holding.asset_class === 'cash') {
+    return 'cash';
+  }
+  if (!holding.quote) {
+    return 'price unavailable';
+  }
+  if (holding.quote.change_pct === null) {
+    return `statement price, ${formatDay(holding.quote.as_of)}`;
+  }
+  const sign = holding.quote.change_pct >= 0 ? '+' : '';
+  return `${sign}${holding.quote.change_pct.toFixed(2)}% today`;
+}
 
 export async function handlePortfolioCommand(userId: string): Promise<string> {
   const summary = await getPortfolioSummary(userId);
 
   if (summary.holdings.length === 0) {
-    return 'No holdings yet. Upload an IBKR/Moomoo statement PDF, or tell me something like "I hold 0.5 BTC", "I hold 10 AAPL shares" or "cash SGD 5000" to get started.';
+    return 'No holdings yet. Send me a brokerage statement as a file (PDF, screenshot or CSV), or tell me something like "I hold 0.5 BTC" or "cash SGD 5000" to get started.';
   }
 
-  const unpricedCount = summary.holdings.filter(
-    (h) => h.quote === null && h.asset_class !== 'cash',
-  ).length;
+  const unpricedCount = summary.holdings.filter((h) => h.quote === null && h.asset_class !== 'cash').length;
 
   const lines = [`Net worth: ${formatCurrency(summary.net_worth_sgd, 'SGD')}`];
   if (unpricedCount > 0) {
@@ -34,10 +47,9 @@ export async function handlePortfolioCommand(userId: string): Promise<string> {
 
   lines.push('', 'Holdings:');
   for (const holding of summary.holdings) {
-    const movement = holding.quote
-      ? `${holding.quote.change_pct >= 0 ? '+' : ''}${holding.quote.change_pct.toFixed(2)}%`
-      : 'price unavailable';
-    lines.push(`  ${holding.symbol}: ${holding.quantity} — ${formatCurrency(holding.value_sgd, 'SGD')} (${movement})`);
+    lines.push(
+      `  ${holding.symbol}: ${holding.quantity} — ${formatCurrency(holding.value_sgd, 'SGD')} (${describePrice(holding)})`,
+    );
   }
 
   return lines.join('\n');

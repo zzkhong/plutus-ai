@@ -8,6 +8,13 @@
       "when": 1789140681688,
       "tag": "0000_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789158603525,
+      "tag": "0001_statement_prices_and_fx_rates",
+      "breakpoints": true
     }
   ]
 }

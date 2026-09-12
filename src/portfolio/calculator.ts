@@ -1,26 +1,27 @@
 /**
- * Pure net worth and allocation math. No I/O — takes holdings + their
- * already-fetched price quotes and produces a PortfolioSummary.
+ * Pure net worth and allocation math. No I/O — takes holdings, their
+ * already-resolved price quotes, and the exchange rates, and produces a
+ * PortfolioSummary.
  */
 
-import { toSGD } from '../config';
+import { ExchangeRates, toSGD } from '../config/currencies';
 import { AllocationEntry, EnrichedHolding, Holding, PortfolioSummary, PriceQuote } from './types';
 
-function computeValueSgd(holding: Holding, quote: PriceQuote | null): number {
+function computeValueSgd(holding: Holding, quote: PriceQuote | null, rates: ExchangeRates): number {
   if (holding.asset_class === 'cash') {
-    const value = toSGD(Math.round(holding.quantity * 100), holding.currency);
+    const value = toSGD(Math.round(holding.quantity * 100), holding.currency, rates);
     return Number.isFinite(value) ? value : 0;
   }
   if (!quote) {
     return 0;
   }
   const valueInQuoteCurrency = holding.quantity * quote.price;
-  const value = toSGD(Math.round(valueInQuoteCurrency * 100), quote.currency);
+  const value = toSGD(Math.round(valueInQuoteCurrency * 100), quote.currency, rates);
   return Number.isFinite(value) ? value : 0;
 }
 
-export function enrichHolding(holding: Holding, quote: PriceQuote | null): EnrichedHolding {
-  return { ...holding, quote, value_sgd: computeValueSgd(holding, quote) };
+export function enrichHolding(holding: Holding, quote: PriceQuote | null, rates: ExchangeRates): EnrichedHolding {
+  return { ...holding, quote, value_sgd: computeValueSgd(holding, quote, rates) };
 }
 
 export function calculateNetWorth(holdings: EnrichedHolding[]): number {

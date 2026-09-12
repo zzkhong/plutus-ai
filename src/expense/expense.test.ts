@@ -235,3 +235,39 @@ test('removeRecurring only deletes when the id belongs to the calling user', asy
   const gone = await listRecurring(otherUser.id);
   assert.ok(!gone.some((r) => r.id === theirs.id));
 });
+
+test("fireRecurringForToday logs a charge for a day the month doesn't have on the month's last day", async () => {
+  const { createUser } = await import('../users/service');
+  const { createRecurring, fireRecurringForToday } = await import('./index');
+  const owner = await createUser('test-expense-month-end-chat');
+  await createRecurring(owner.id, {
+    amount: 30,
+    currency: 'SGD',
+    merchant: 'Month End Rent',
+    category: 'Bills',
+    day_of_month: 31,
+    is_active: true,
+  });
+
+  // September has 30 days: nothing on the 29th, the charge on the 30th.
+  assert.equal((await fireRecurringForToday(owner.id, new Date(2026, 8, 29, 9, 0))).length, 0);
+  const onLastDay = await fireRecurringForToday(owner.id, new Date(2026, 8, 30, 9, 0));
+  assert.deepEqual(onLastDay.map((t) => t.merchant), ['Month End Rent']);
+});
+
+test('fireRecurringForToday does not fire a 31st charge early in a month that has a 31st', async () => {
+  const { createUser } = await import('../users/service');
+  const { createRecurring, fireRecurringForToday } = await import('./index');
+  const owner = await createUser('test-expense-month-31-chat');
+  await createRecurring(owner.id, {
+    amount: 30,
+    currency: 'SGD',
+    merchant: 'October Rent',
+    category: 'Bills',
+    day_of_month: 31,
+    is_active: true,
+  });
+
+  assert.equal((await fireRecurringForToday(owner.id, new Date(2026, 9, 30, 9, 0))).length, 0);
+  assert.equal((await fireRecurringForToday(owner.id, new Date(2026, 9, 31, 9, 0))).length, 1);
+});

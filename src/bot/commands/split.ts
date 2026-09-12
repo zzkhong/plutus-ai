@@ -6,6 +6,7 @@
 
 import { logger } from '../../utils/logger';
 import { logExpense } from '../../expense';
+import { budgetAlertFor } from '../../budget/alerts';
 import { extractReceipt, ExtractionError } from '../../split/extraction';
 import { parseSplitInstructions, AssignmentParseError } from '../../split/assignment';
 import { calculateEvenSplit, calculateItemizedSplit } from '../../split/calculator';
@@ -37,7 +38,7 @@ export async function handleSplitPhoto(
 ): Promise<string> {
   const state = await getSplitState(chatId);
   if (!state || state.stage !== 'awaiting_photo') {
-    return 'Got a photo — if you want to split a bill, run /split first.';
+    return 'Got a photo — to split a bill, run /split first. To import a brokerage statement screenshot, send it as a file instead.';
   }
 
   try {
@@ -131,7 +132,9 @@ export async function handleSplitTextMessage(chatId: number, userId: string, mes
 
     await clearSplit(chatId);
 
-    return `Logged ${formatCurrency(transaction.amount_sgd, 'SGD')} for ${transaction.merchant} (${transaction.category}).`;
+    const reply = `Logged ${formatCurrency(transaction.amount_sgd, 'SGD')} for ${transaction.merchant} (${transaction.category}).`;
+    const alert = await budgetAlertFor(userId, transaction);
+    return alert ? `${reply}\n\n${alert}` : reply;
   }
 
   throw new Error(`Unexpected split stage "${state.stage}" for chat ${chatId}`);

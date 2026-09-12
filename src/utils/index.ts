@@ -3,4 +3,3 @@
  */
 
 export { logger } from './logger';
-export { currencyUtils } from './currency';

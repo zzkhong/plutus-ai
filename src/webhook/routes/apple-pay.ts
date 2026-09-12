@@ -6,6 +6,7 @@
 import { Context } from 'hono';
 import { Bot } from 'grammy';
 import { logExpense } from '../../expense/service';
+import { budgetAlertFor } from '../../budget/alerts';
 import { parseExplicitCurrency } from '../../expense/currency-resolver';
 import { formatCurrency } from '../../config';
 import { logger } from '../../utils/logger';
@@ -37,7 +38,10 @@ async function sendConfirmation(bot: Bot | null, user: User, transaction: Transa
   }
 
   const amountLabel = formatCurrency(transaction.amount, transaction.currency);
-  const message = `Spent ${amountLabel} at ${transaction.merchant} — ${transaction.category}`;
+  const alert = await budgetAlertFor(user.id, transaction);
+  const message = [`Spent ${amountLabel} at ${transaction.merchant} — ${transaction.category}`, alert]
+    .filter(Boolean)
+    .join('\n\n');
 
   try {
     await bot.api.sendMessage(user.telegram_chat_id, message);

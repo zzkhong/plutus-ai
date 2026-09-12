@@ -58,6 +58,8 @@ const envSchema = z
     ),
     ADMIN_CHAT_ID: optional(z.string()),
     CRON_SECRET: optional(z.string().min(16, 'CRON_SECRET should be at least 16 characters')),
+    // exchangerate-api.com; without it conversions use FALLBACK_EXCHANGE_RATES.
+    EXCHANGE_RATE_API_KEY: optional(z.string()),
     ENCRYPTION_KEY: z
       .string()
       .regex(/^[0-9a-f]{64}$/i, 'ENCRYPTION_KEY must be a 64-character hex string (32 bytes) for AES-256-GCM'),

@@ -195,3 +195,18 @@ test('generatePortfolioAdvice builds the prompt only from the summary it is hand
   assert.match(bodies[bodies.length - 1], /BBBB/);
   assert.doesNotMatch(bodies[bodies.length - 1], /AAAA/);
 });
+
+test('buildAdvicePrompt gives a statement-priced holding its statement date instead of a daily move', () => {
+  const prompt = buildAdvicePrompt(
+    summary({
+      holdings: [
+        holding({
+          quote: { price: 326.57, currency: 'USD', change_pct: null, as_of: new Date('2026-09-10T00:00:00'), source: 'statement' },
+        }),
+      ],
+    }),
+  );
+
+  assert.match(prompt, /statement price/);
+  assert.doesNotMatch(prompt, /% today/);
+});

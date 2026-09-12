@@ -40,6 +40,14 @@ export default [
     },
   },
   {
+    // CommonJS helpers (the test runner's --import setup) run under Node.
+    files: ['src/**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
+    },
+  },
+  {
     ignores: ['dist/**', 'node_modules/**', 'data/**', 'scripts/**'],
   },
 ];

@@ -467,3 +467,22 @@ test('GET /api/cron/* answers 500 when the job throws', async () => {
 
   assert.equal(res.status, 500);
 });
+
+test('POST /api/apple-pay adds the budget alert to the Telegram confirmation when a purchase crosses a threshold', async () => {
+  const { createWebhookApp } = await import('./index');
+  const { setBudget } = await import('../budget/service');
+  await setBudget(approvedUserId, 'Transport', 5, 'SGD');
+
+  const { bot, sent } = fakeBot();
+  const app = createWebhookApp(bot);
+  const res = await app.request('/api/apple-pay', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': approvedKey },
+    body: JSON.stringify({ amount: '4.50', merchant: 'Grab', card: 'DBS' }),
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(sent.length, 1, 'one message: the confirmation with the alert under it');
+  assert.match(sent[0].text, /Spent S\$4\.50 at Grab/);
+  assert.match(sent[0].text, /Transport budget alert: you've used 80%/);
+});

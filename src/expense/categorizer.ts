@@ -7,7 +7,7 @@ import { findById } from '../users/service';
 import { Category } from '../types';
 import { logger } from '../utils/logger';
 
-const VALID_CATEGORIES: readonly Category[] = [
+export const VALID_CATEGORIES: readonly Category[] = [
   'Food',
   'Transport',
   'Groceries',
@@ -38,10 +38,14 @@ function safeJsonParse(text: string): Partial<CategorizationResult> | null {
   }
 }
 
+/** The category a user named, matched case-insensitively, or null if it isn't one of ours. */
+export function matchCategory(rawCategory: string): Category | null {
+  const normalized = rawCategory.trim().toLowerCase();
+  return VALID_CATEGORIES.find((cat) => cat.toLowerCase() === normalized) ?? null;
+}
+
 export function normalizeCategoryName(rawCategory: string): Category {
-  const normalized = rawCategory.trim();
-  const match = VALID_CATEGORIES.find((cat) => cat.toLowerCase() === normalized.toLowerCase());
-  return match || 'Others';
+  return matchCategory(rawCategory) ?? 'Others';
 }
 
 /**

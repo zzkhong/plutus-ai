@@ -3,13 +3,14 @@
  */
 
 import { randomUUID } from 'crypto';
-import { and, desc, eq, gte, lt } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, lt, or } from 'drizzle-orm';
 
-import { toSGD } from '../config';
+import { SUPPORTED_CURRENCIES, toSGD } from '../config';
+import { getExchangeRates } from '../fx/rates';
 import { db } from '../db';
 import { transactions, recurring_transactions } from '../db/schema';
 import { Category, Currency, Transaction, RecurringTransaction } from '../types';
-import { inferCategory } from './categorizer';
+import { inferCategory, matchCategory } from './categorizer';
 import { resolveCurrency } from './currency-resolver';
 import {
   Comparison,
@@ -23,8 +24,7 @@ function centsFromAmount(amount: number): number {
   return Math.max(0, Math.round(amount * 100));
 }
 
-function startOfPeriod(period: SpendingPeriod): number {
-  const now = new Date();
+function startOfPeriod(period: SpendingPeriod, now: Date = new Date()): number {
   const start = new Date(now);
 
   if (period === 'today') {
@@ -71,7 +71,7 @@ export async function logExpense(userId: string, data: ExpenseInput): Promise<Tr
   const merchant = (data.merchant ?? 'Unknown merchant').trim() || 'Unknown merchant';
   const category = await inferCategory(userId, { merchant, note: data.note, amount: amountCents });
   const now = Date.now();
-  const amountSgd = toSGD(amountCents, normalizedCurrency);
+  const amountSgd = toSGD(amountCents, normalizedCurrency, await getExchangeRates());
 
   const [inserted] = await db
     .insert(transactions)
@@ -191,7 +191,10 @@ export async function correctLastTransaction(userId: string, field: string, valu
   if (normalizedField === 'merchant') {
     updates.merchant = value;
   } else if (normalizedField === 'category') {
-    updates.category = await inferCategory(userId, { merchant: row.merchant, note: value, amount: row.amount });
+    // A category the user names outright is used as-is — the categorizer
+    // could otherwise overrule them. Anything else is a hint for it.
+    updates.category =
+      matchCategory(value) ?? (await inferCategory(userId, { merchant: row.merchant, note: value, amount: row.amount }));
   } else if (normalizedField === 'note') {
     updates.note = value;
   } else if (normalizedField === 'amount') {
@@ -203,16 +206,19 @@ export async function correctLastTransaction(userId: string, field: string, valu
       note: row.note ?? undefined,
     });
     updates.amount = nextAmount;
-    updates.amount_sgd = toSGD(nextAmount, resolvedCurrency);
+    updates.amount_sgd = toSGD(nextAmount, resolvedCurrency, await getExchangeRates());
   } else if (normalizedField === 'currency') {
     const nextCurrency = resolveCurrency({
-      currency: value as Currency,
+      // Only SGD, MYR and USD have exchange rates; anything else keeps the current currency.
+      currency: SUPPORTED_CURRENCIES.includes(value.trim().toUpperCase() as Currency)
+        ? (value.trim().toUpperCase() as Currency)
+        : (row.currency as Currency),
       cardName: row.card_name,
       merchant: row.merchant,
       note: row.note ?? undefined,
     });
     updates.currency = nextCurrency;
-    updates.amount_sgd = toSGD(row.amount, nextCurrency);
+    updates.amount_sgd = toSGD(row.amount, nextCurrency, await getExchangeRates());
   }
 
   const [updated] = await db.update(transactions).set(updates).where(eq(transactions.id, row.id)).returning();
@@ -330,8 +336,17 @@ export async function listRecurring(userId: string): Promise<RecurringTransactio
   return rows.map(mapRecurringRow);
 }
 
-export async function fireRecurringForToday(userId: string): Promise<Transaction[]> {
-  const today = new Date().getDate();
+/**
+ * Logs every recurring charge due today. `at` is injectable for tests.
+ *
+ * A template's day may not exist this month — the 31st in September, the
+ * 30th in February. Those fire on the month's last day rather than being
+ * skipped, which is what happened before: a charge on the 31st went missing
+ * five months a year.
+ */
+export async function fireRecurringForToday(userId: string, at: Date = new Date()): Promise<Transaction[]> {
+  const today = at.getDate();
+  const lastDayOfMonth = new Date(at.getFullYear(), at.getMonth() + 1, 0).getDate();
   const dueRows = await db
     .select()
     .from(recurring_transactions)
@@ -339,7 +354,10 @@ export async function fireRecurringForToday(userId: string): Promise<Transaction
       and(
         eq(recurring_transactions.user_id, userId),
         eq(recurring_transactions.is_active, 1),
-        eq(recurring_transactions.day_of_month, today),
+        or(
+          eq(recurring_transactions.day_of_month, today),
+          today === lastDayOfMonth ? gt(recurring_transactions.day_of_month, lastDayOfMonth) : undefined,
+        ),
       ),
     );
 
@@ -354,17 +372,18 @@ export async function fireRecurringForToday(userId: string): Promise<Transaction
       and(
         eq(transactions.user_id, userId),
         eq(transactions.source, 'recurring'),
-        gte(transactions.created_at, startOfPeriod('today')),
+        gte(transactions.created_at, startOfPeriod('today', at)),
       ),
     );
   const alreadyFired = new Set(firedToday.map((row) => row.recurring_id));
 
+  const rates = await getExchangeRates();
   const created: Transaction[] = [];
   for (const recurring of dueRows) {
     if (alreadyFired.has(recurring.id)) {
       continue;
     }
-    const amountSgd = toSGD(recurring.amount, recurring.currency as Currency);
+    const amountSgd = toSGD(recurring.amount, recurring.currency as Currency, rates);
     const now = Date.now();
 
     const [inserted] = await db

@@ -8,10 +8,11 @@
 
 import { getProviderForUser } from '../llm/provider';
 import { findById } from '../users/service';
+import { formatDay } from '../utils/dates';
 import { PortfolioSummary, EnrichedHolding } from './types';
 
 export const NO_HOLDINGS_MESSAGE =
-  'No holdings on file yet — send me a brokerage statement PDF to get started.';
+  'No holdings on file yet — send me a brokerage statement as a file (PDF, screenshot or CSV) to get started.';
 
 export const UNGROUNDED_CAVEAT = '(Based on general knowledge, not live market data.)';
 
@@ -26,8 +27,14 @@ function money(cents: number): string {
 function describeHolding(holding: EnrichedHolding): string {
   const base = `- ${holding.symbol} (${holding.name}), ${holding.quantity} units, ${holding.asset_class}, worth ${money(holding.value_sgd)}`;
 
+  if (holding.asset_class === 'cash') {
+    return `${base}, cash`;
+  }
   if (!holding.quote) {
     return `${base}, price unavailable`;
+  }
+  if (holding.quote.change_pct === null) {
+    return `${base}, valued at its ${formatDay(holding.quote.as_of)} statement price`;
   }
 
   const direction = holding.quote.change_pct >= 0 ? '+' : '';

@@ -145,3 +145,17 @@ test('addHolding refuses a symbol that already comes from a statement, so it is 
   );
   assert.equal((await listHoldings(userId)).filter((h) => h.symbol === 'C6L').length, 1);
 });
+
+test("replaceHoldingsForBroker keeps each position's statement price and date, and a newer statement overwrites them", async () => {
+  const { replaceHoldingsForBroker, listHoldings } = await import('./service');
+  const aapl = { symbol: 'AAPL', name: 'Apple', asset_class: 'stocks_us' as const, currency: 'USD' as const, market: 'NASDAQ' };
+
+  await replaceHoldingsForBroker(userId, 'tiger', [{ ...aapl, quantity: 10, price: 300 }], new Date('2026-08-31T00:00:00'));
+  await replaceHoldingsForBroker(userId, 'tiger', [{ ...aapl, quantity: 12, price: 326.57 }], new Date('2026-09-10T00:00:00'));
+
+  const tiger = (await listHoldings(userId)).filter((h) => h.broker === 'tiger');
+  assert.equal(tiger.length, 1);
+  assert.equal(tiger[0].quantity, 12);
+  assert.equal(tiger[0].price, 326.57);
+  assert.equal(tiger[0].price_as_of?.getTime(), new Date('2026-09-10T00:00:00').getTime());
+});

@@ -2,7 +2,8 @@
  * Transaction types and related enums
  */
 
-export type Currency = 'SGD' | 'MYR' | 'USD' | 'BTC' | 'ETH' | 'BETH';
+// ISO 4217. Crypto is an asset priced in USD, not a currency.
+export type Currency = 'SGD' | 'MYR' | 'USD';
 
 export type Category =
   | 'Food'

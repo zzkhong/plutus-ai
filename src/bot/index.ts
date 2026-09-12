@@ -199,7 +199,7 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
     if (!ctx.user) return;
     const document = ctx.message.document;
     const buffer = await downloadTelegramFile(bot, document.file_id);
-    await ctx.reply(await handleDocumentMessage(ctx.user.id, buffer, document.mime_type ?? ''));
+    await ctx.reply(await handleDocumentMessage(ctx.user.id, buffer, document.mime_type ?? '', document.file_name));
   });
 
   bot.on('message:photo', async (ctx) => {

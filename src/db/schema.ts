@@ -66,6 +66,11 @@ export const holdings = sqliteTable('holdings', {
   market: text('market').notNull(),
   broker: text('broker'), // 'ibkr' | 'moomoo' | null (null = manually entered: crypto/cash)
   cost_basis: integer('cost_basis'), // optional, in cents
+  // Per-unit price on the statement the holding was imported from, in
+  // `currency`, and the date that statement valued it at. Stocks are valued
+  // with these; there are no live stock quotes. Null for chat entries.
+  price: real('price'),
+  price_as_of: integer('price_as_of'),
   created_at: integer('created_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
@@ -138,4 +143,12 @@ export const split_sessions = sqliteTable('split_sessions', {
   updated_at: integer('updated_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
+});
+
+// Live exchange rates, cached for a day across every function instance — see
+// src/fx/rates.ts. One row, keyed by the base currency.
+export const fx_rates = sqliteTable('fx_rates', {
+  id: text('id').primaryKey(),
+  rates: text('rates').notNull(), // JSON: units of each currency per 1 SGD
+  fetched_at: integer('fetched_at').notNull(),
 });

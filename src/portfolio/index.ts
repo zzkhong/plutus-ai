@@ -2,6 +2,7 @@
  * Portfolio module public API.
  */
 
+import { getExchangeRates } from '../fx/rates';
 import { getPrice } from './price-fetcher';
 import { enrichHolding, buildPortfolioSummary } from './calculator';
 import { listHoldings } from './service';
@@ -14,9 +15,9 @@ export { getPrice } from './price-fetcher';
 export { calculateNetWorth, calculateAllocation, enrichHolding, buildPortfolioSummary } from './calculator';
 
 export async function getPortfolioSummary(userId: string): Promise<PortfolioSummary> {
-  const holdingsList = await listHoldings(userId);
+  const [holdingsList, rates] = await Promise.all([listHoldings(userId), getExchangeRates()]);
   const enriched = await Promise.all(
-    holdingsList.map(async (holding) => enrichHolding(holding, await getPrice(holding))),
+    holdingsList.map(async (holding) => enrichHolding(holding, await getPrice(holding), rates)),
   );
   return buildPortfolioSummary(enriched);
 }

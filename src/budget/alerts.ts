@@ -8,6 +8,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { budget_alerts } from '../db/schema';
 import { Transaction } from '../types';
+import { logger } from '../utils/logger';
 import { getSpendingByCategory } from '../expense/service';
 import { findBudgetByCategory } from './service';
 import { Alert } from './types';
@@ -91,4 +92,20 @@ export async function checkAlerts(userId: string, transaction: Transaction): Pro
   }
 
   return null;
+}
+
+/**
+ * The alert message a freshly logged expense triggers, if any, for callers
+ * that report the expense to the user — the chat and voice reply, Apple Pay,
+ * a /split share, a correction. Never throws: the expense is already saved,
+ * and a failed alert check must not turn that into an error the user retries,
+ * logging the expense twice.
+ */
+export async function budgetAlertFor(userId: string, transaction: Transaction): Promise<string | null> {
+  try {
+    return (await checkAlerts(userId, transaction))?.message ?? null;
+  } catch (error) {
+    logger.error('Budget alert check failed', error);
+    return null;
+  }
 }
