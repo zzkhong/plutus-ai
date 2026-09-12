@@ -15,11 +15,6 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "ts-node": {
-    "esm": false,
-    "experimentalEsm": false,
-    "transpileOnly": true
-  },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }

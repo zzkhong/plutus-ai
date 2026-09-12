@@ -1,7 +1,6 @@
 /**
  * /split flow orchestration: receipt photo -> even/itemized split ->
- * optional logging of the requester's own share only. See
- * docs/tasks/08-expense-split.md.
+ * optional logging of the requester's own share only.
  */
 
 import { logger } from '../../utils/logger';

@@ -79,6 +79,9 @@ data/*.sqlite3
 *.sqlite
 *.sqlite3
 
+# Claude Code's per-machine settings
+.claude/settings.local.json
+
 # CSV exports written by /export — real per-user financial data, never commit
 data/exports/
 
