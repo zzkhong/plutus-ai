@@ -60,13 +60,14 @@ export async function getPrice(holding: Holding): Promise<PriceQuote | null> {
     return statementQuote(holding);
   }
 
-  const key = `crypto:${holding.symbol}`;
+  // A coin the user picked on CoinGecko is priced by that id; otherwise by the built-in table.
+  const key = `crypto:${holding.coingecko_id ?? holding.symbol}`;
   const cached = cache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.quote;
   }
 
-  const quote = await withTimeout(getCryptoPrice(holding.symbol), FETCH_TIMEOUT_MS);
+  const quote = await withTimeout(getCryptoPrice(holding.symbol, holding.coingecko_id ?? undefined), FETCH_TIMEOUT_MS);
   if (quote) {
     cache.set(key, { quote, expiresAt: Date.now() + CRYPTO_TTL_MS });
   }

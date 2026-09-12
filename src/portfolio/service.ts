@@ -22,6 +22,7 @@ function mapHoldingRow(row: typeof holdings.$inferSelect): Holding {
     cost_basis: row.cost_basis ?? undefined,
     price: row.price ?? null,
     price_as_of: row.price_as_of ? new Date(row.price_as_of) : null,
+    coingecko_id: row.coingecko_id ?? null,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
   };
@@ -111,6 +112,27 @@ export async function removeHolding(userId: string, symbol: string): Promise<num
     .where(and(eq(holdings.user_id, userId), eq(holdings.symbol, symbol), isNull(holdings.broker)))
     .returning({ id: holdings.id });
   return removed.length;
+}
+
+/**
+ * Prices the user's chat-entered holding of a coin outside the built-in
+ * table by the CoinGecko coin they picked. Only their own manual crypto rows
+ * for that symbol; returns how many changed (0 once they've removed it).
+ */
+export async function setCoingeckoId(userId: string, symbol: string, coingeckoId: string): Promise<number> {
+  const updated = await db
+    .update(holdings)
+    .set({ coingecko_id: coingeckoId, updated_at: Date.now() })
+    .where(
+      and(
+        eq(holdings.user_id, userId),
+        eq(holdings.symbol, symbol),
+        isNull(holdings.broker),
+        eq(holdings.asset_class, 'crypto'),
+      ),
+    )
+    .returning({ id: holdings.id });
+  return updated.length;
 }
 
 /**

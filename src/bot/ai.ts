@@ -14,7 +14,7 @@ import {
   formatSpendingSummary,
   formatUserFriendlyError,
 } from './formatter/messages';
-import { incomeActions, transactionActions } from './keyboards';
+import { coinPicker, incomeActions, transactionActions } from './keyboards';
 import { BotIntent, BotReply } from './types';
 import { Currency, OVERALL_BUDGET, Transaction } from '../types';
 import { isPricedCrypto } from '../portfolio/price-fetcher/crypto';
@@ -453,8 +453,19 @@ async function replyForIntent(
         throw error;
       }
 
-      if (assetClass === 'crypto' && !isPricedCrypto(symbol)) {
-        return `Recorded ${holding.quantity} ${holding.symbol}, but I don't have a price source for ${symbol} yet, so it counts as S$0 in your net worth.`;
+      if (assetClass === 'crypto' && !isPricedCrypto(symbol) && !holding.coingecko_id) {
+        // Not in the built-in table: offer CoinGecko's exact-ticker matches
+        // and let the user say which. Unrelated tokens share tickers, so
+        // picking one for them could price the wrong coin.
+        const { searchCoins } = await import('../portfolio/price-fetcher/crypto');
+        const candidates = await searchCoins(symbol);
+        if (candidates.length > 0) {
+          return {
+            text: `Recorded ${holding.quantity} ${holding.symbol}. Which coin is your ${symbol}? I'll price it live from CoinGecko.`,
+            keyboard: coinPicker(symbol, candidates),
+          };
+        }
+        return `Recorded ${holding.quantity} ${holding.symbol}, but I couldn't find ${symbol} on CoinGecko, so it counts as S$0 in your net worth.`;
       }
       return `Got it — recorded ${holding.quantity} ${holding.symbol}.`;
     }

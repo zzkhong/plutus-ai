@@ -25,6 +25,8 @@ export interface Holding {
   price: number | null;
   /** The date that statement valued the position at. */
   price_as_of: Date | null;
+  /** The CoinGecko coin the user picked for a crypto symbol outside the built-in table; null otherwise. */
+  coingecko_id?: string | null;
   created_at: Date;
   updated_at: Date;
 }

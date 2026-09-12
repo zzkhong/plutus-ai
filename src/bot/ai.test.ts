@@ -270,16 +270,64 @@ test('buildAssistantReply infers crypto for a listed coin even without an asset 
   assert.equal(sol?.asset_class, 'crypto');
 });
 
-test('buildAssistantReply warns when a crypto coin has no price source', async () => {
-  const { buildAssistantReply } = await import('./ai');
-  const { text: reply } = await buildAssistantReply(userId, {
-    intent: 'holdings',
-    confidence: 0.9,
-    extracted: { symbol: 'FOOCOIN', amount: 5, assetClass: 'crypto' },
-    rawText: 'I hold 5 FOOCOIN',
-  });
+function coinSearch(coins: unknown[]): { restore: () => void; urls: string[] } {
+  const originalFetch = global.fetch;
+  const urls: string[] = [];
+  global.fetch = (async (url: unknown) => {
+    urls.push(String(url));
+    return new Response(JSON.stringify({ coins }), { status: 200 });
+  }) as typeof fetch;
+  return { urls, restore: () => (global.fetch = originalFetch) };
+}
 
-  assert.match(reply, /no price source|don't have a price source/i);
+test('buildAssistantReply says when a coin has no price source, even on CoinGecko', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const search = coinSearch([]);
+  try {
+    const { text: reply, keyboard } = await buildAssistantReply(userId, {
+      intent: 'holdings',
+      confidence: 0.9,
+      extracted: { symbol: 'FOOCOIN', amount: 5, assetClass: 'crypto' },
+      rawText: 'I hold 5 FOOCOIN',
+    });
+
+    assert.match(reply, /couldn't find FOOCOIN on CoinGecko, so it counts as S\$0/);
+    assert.equal(keyboard, undefined);
+  } finally {
+    search.restore();
+  }
+});
+
+test('buildAssistantReply offers the CoinGecko coins with that exact ticker, largest first, to pick from', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const search = coinSearch([
+    { id: 'bonk-copy', name: 'Bonk Copy', symbol: 'BONK', market_cap_rank: null },
+    { id: 'bonk-2', name: 'Bonk 2', symbol: 'bonk', market_cap_rank: 1200 },
+    { id: 'bonkers', name: 'Bonkers', symbol: 'BONKERS', market_cap_rank: 900 },
+    { id: 'bonk', name: 'Bonk', symbol: 'BONK', market_cap_rank: 60 },
+  ]);
+  try {
+    const reply = await buildAssistantReply(userId, {
+      intent: 'holdings',
+      confidence: 0.9,
+      extracted: { symbol: 'BONK', amount: 1000000, assetClass: 'crypto' },
+      rawText: 'I hold 1000000 BONK',
+    });
+
+    assert.match(search.urls[0], /\/search\?query=BONK$/);
+    assert.equal(reply.text, "Recorded 1000000 BONK. Which coin is your BONK? I'll price it live from CoinGecko.");
+    assert.deepEqual(
+      (reply.keyboard!.inline_keyboard.flat() as any[]).map((button) => [button.text, button.callback_data]),
+      [
+        ['Bonk · #60', 'h:g:BONK:60'],
+        ['Bonk 2 · #1200', 'h:g:BONK:1200'],
+        ['None of these', 'h:n:BONK'],
+      ],
+      'unranked copies and other tickers are left out',
+    );
+  } finally {
+    search.restore();
+  }
 });
 
 test('buildAssistantReply explains a statement holding cannot be removed by hand, instead of claiming it was', async () => {

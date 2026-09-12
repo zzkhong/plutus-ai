@@ -8,6 +8,8 @@ import { InlineKeyboard } from 'grammy';
 import { budgetAlertFor } from '../../budget/alerts';
 import { deleteTransaction, getTransaction, setTransactionCategory } from '../../expense/service';
 import { deleteIncome } from '../../income/service';
+import { findCoinByRank } from '../../portfolio/price-fetcher/crypto';
+import { setCoingeckoId } from '../../portfolio/service';
 import { handleRecentCommand } from '../commands/recent';
 import { formatExpenseLine, formatMoneyWithSgd, formatTransactionDetail } from '../formatter/messages';
 import { backToRecent, categoryPicker, parseCallbackData, transactionActions } from '../keyboards';
@@ -40,6 +42,30 @@ export async function handleCallback(userId: string, data: string): Promise<Call
     return {
       toast: 'Removed',
       text: `Removed ${formatMoneyWithSgd(removed)} of income from ${removed.source}.`,
+      keyboard: null,
+    };
+  }
+
+  if (action.kind === 'pick-coin') {
+    const coin = await findCoinByRank(action.symbol, action.rank);
+    if (!coin) {
+      return {
+        toast: `I couldn't confirm that coin on CoinGecko just now. Try again, or send the holding again for a fresh list.`,
+      };
+    }
+    if ((await setCoingeckoId(userId, action.symbol, coin.id)) === 0) {
+      return { toast: `You don't hold ${action.symbol} any more.`, keyboard: null };
+    }
+    return {
+      toast: 'Priced',
+      text: `Got it — your ${action.symbol} is ${coin.name}, priced live from CoinGecko. /portfolio includes it now.`,
+      keyboard: null,
+    };
+  }
+
+  if (action.kind === 'skip-coin') {
+    return {
+      text: `OK — ${action.symbol} stays without a price, so it counts as S$0 in your net worth.`,
       keyboard: null,
     };
   }

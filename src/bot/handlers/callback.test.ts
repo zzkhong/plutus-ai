@@ -219,3 +219,76 @@ test("income's Undo button removes that income, once", async () => {
   const again = await handleCallback(owner, `i:d:${entry.id}`);
   assert.match(again.toast ?? '', /already removed/);
 });
+
+// --- picking a coin on CoinGecko ------------------------------------------------------
+
+test('parseCallbackData reads the coin picker buttons', async () => {
+  const { parseCallbackData } = await import('../keyboards');
+
+  assert.deepEqual(parseCallbackData('h:g:WIF:80'), { kind: 'pick-coin', symbol: 'WIF', rank: 80 });
+  assert.deepEqual(parseCallbackData('h:n:WIF'), { kind: 'skip-coin', symbol: 'WIF' });
+  assert.equal(parseCallbackData('h:g:wif:80'), null, 'symbols are stored upper-case');
+  assert.equal(parseCallbackData('h:g:WIF:eighty'), null);
+  assert.equal(parseCallbackData('h:x:WIF'), null);
+});
+
+function coinSearch(coins: unknown[]): () => void {
+  const originalFetch = global.fetch;
+  global.fetch = (async () => new Response(JSON.stringify({ coins }), { status: 200 })) as typeof fetch;
+  return () => {
+    global.fetch = originalFetch;
+  };
+}
+
+const WIF = { symbol: 'WIF', name: 'WIF', quantity: 100, asset_class: 'crypto' as const, currency: 'USD' as const, market: 'Crypto' };
+
+test('picking a coin prices the holding by that coin from then on', async () => {
+  const { handleCallback } = await import('./callback');
+  const { addHolding, listHoldings } = await import('../../portfolio/service');
+  const owner = await approvedUser('test-callback-coin-chat');
+  await addHolding(owner, WIF);
+
+  const restore = coinSearch([
+    { id: 'dogwifhat', name: 'dogwifhat', symbol: 'WIF', market_cap_rank: 80 },
+    { id: 'wif-2', name: 'Wif 2', symbol: 'WIF', market_cap_rank: 3000 },
+  ]);
+  let outcome;
+  try {
+    outcome = await handleCallback(owner, 'h:g:WIF:80');
+  } finally {
+    restore();
+  }
+
+  assert.equal(outcome.text, 'Got it — your WIF is dogwifhat, priced live from CoinGecko. /portfolio includes it now.');
+  assert.equal(outcome.keyboard, null);
+  assert.equal((await listHoldings(owner)).find((h) => h.symbol === 'WIF')?.coingecko_id, 'dogwifhat');
+});
+
+test('a coin that CoinGecko no longer lists at that rank keeps the picker and says so', async () => {
+  const { handleCallback } = await import('./callback');
+  const { addHolding, listHoldings } = await import('../../portfolio/service');
+  const owner = await approvedUser('test-callback-coin-moved-chat');
+  await addHolding(owner, WIF);
+
+  const restore = coinSearch([{ id: 'dogwifhat', name: 'dogwifhat', symbol: 'WIF', market_cap_rank: 81 }]);
+  let outcome;
+  try {
+    outcome = await handleCallback(owner, 'h:g:WIF:80');
+  } finally {
+    restore();
+  }
+
+  assert.match(outcome.toast ?? '', /couldn't confirm that coin/);
+  assert.equal(outcome.keyboard, undefined, 'the buttons stay');
+  assert.equal((await listHoldings(owner)).find((h) => h.symbol === 'WIF')?.coingecko_id, null);
+});
+
+test('"None of these" leaves the coin unpriced', async () => {
+  const { handleCallback } = await import('./callback');
+  const owner = await approvedUser('test-callback-coin-skip-chat');
+
+  const outcome = await handleCallback(owner, 'h:n:WIF');
+
+  assert.equal(outcome.text, 'OK — WIF stays without a price, so it counts as S$0 in your net worth.');
+  assert.equal(outcome.keyboard, null);
+});

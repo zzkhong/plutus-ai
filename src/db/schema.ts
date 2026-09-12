@@ -96,6 +96,9 @@ export const holdings = sqliteTable('holdings', {
   // with these; there are no live stock quotes. Null for chat entries.
   price: real('price'),
   price_as_of: integer('price_as_of'),
+  // For a coin outside the built-in price table: the CoinGecko coin the
+  // user picked from a search, since unrelated tokens share tickers.
+  coingecko_id: text('coingecko_id'),
   created_at: integer('created_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),

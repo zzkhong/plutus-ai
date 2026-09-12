@@ -147,7 +147,9 @@ shows it on demand.
 - **Track your portfolio** — send any broker's statement **as a file** (PDF,
   screenshot or CSV) and your positions are imported at the statement's
   prices. Add crypto and cash in chat (*"I hold 0.5 BTC"*, *"cash SGD
-  5000"*). `/portfolio` shows your net worth and where it sits.
+  5000"*). For a coin Plutus doesn't know, it shows the coins with that
+  ticker on CoinGecko and you tap yours. `/portfolio` shows your net worth
+  and where it sits.
 - **Export your data** — `/export` sends you this year's transactions as a CSV
   file you can open in Excel or Google Sheets.
 

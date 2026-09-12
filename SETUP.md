@@ -275,7 +275,9 @@ New net worth: S$77,088.32.
 - Positions priced in a currency other than SGD, MYR or USD, or listed outside
   the US, SGX and Bursa, are skipped and named in the reply.
 - Add crypto and cash in chat: *"I hold 0.5 BTC"*, *"cash SGD 5000"*. Crypto
-  is priced live.
+  is priced live. For a coin the bot doesn't know, it lists the coins with
+  that ticker on CoinGecko for you to pick from, since many tokens share a
+  ticker.
 - `/portfolio` shows each holding with its value in SGD and where the price
   came from.
 

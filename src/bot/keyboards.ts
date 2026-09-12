@@ -10,6 +10,9 @@
  *   t:v:<id>              open transaction <id> from the /recent list
  *   r:l                   the /recent list
  *   i:d:<id>              delete income <id>
+ *   h:g:<SYMBOL>:<rank>   price chat-entered coin <SYMBOL> as the CoinGecko
+ *                         coin at market-cap rank <rank>
+ *   h:n:<SYMBOL>          leave <SYMBOL> unpriced
  *
  * <ctx> is where the buttons sit: 'c' under a confirmation, 'r' in /recent,
  * which adds a way back to the list. The longest, "t:s:r:" + a UUID +
@@ -33,9 +36,12 @@ export type CallbackAction =
   | { kind: 'back'; ctx: ButtonContext; transactionId: string }
   | { kind: 'view'; transactionId: string }
   | { kind: 'recent' }
-  | { kind: 'delete-income'; incomeId: string };
+  | { kind: 'delete-income'; incomeId: string }
+  | { kind: 'pick-coin'; symbol: string; rank: number }
+  | { kind: 'skip-coin'; symbol: string };
 
 const ID = /^[0-9a-f-]{36}$/i;
+const SYMBOL = /^[A-Z0-9]{1,15}$/;
 
 function isContext(value: string): value is ButtonContext {
   return value === 'c' || value === 'r';
@@ -50,6 +56,15 @@ export function parseCallbackData(data: string): CallbackAction | null {
   }
   if (parts[0] === 'i' && parts[1] === 'd' && parts.length === 3 && ID.test(parts[2])) {
     return { kind: 'delete-income', incomeId: parts[2] };
+  }
+  if (parts[0] === 'h' && SYMBOL.test(parts[2] ?? '')) {
+    if (parts[1] === 'g' && parts.length === 4 && /^\d{1,6}$/.test(parts[3])) {
+      return { kind: 'pick-coin', symbol: parts[2], rank: Number(parts[3]) };
+    }
+    if (parts[1] === 'n' && parts.length === 3) {
+      return { kind: 'skip-coin', symbol: parts[2] };
+    }
+    return null;
   }
   if (parts[0] !== 't') {
     return null;
@@ -111,6 +126,15 @@ export function recentList(entries: Array<{ id: string; label: string }>): Inlin
 
 export function backToRecent(): InlineKeyboard {
   return new InlineKeyboard().text('« All recent', 'r:l');
+}
+
+/** One button per CoinGecko match for a coin outside the built-in table, and a way to leave it unpriced. */
+export function coinPicker(symbol: string, candidates: Array<{ name: string; rank: number }>): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  for (const coin of candidates) {
+    keyboard.text(`${coin.name} · #${coin.rank}`, `h:g:${symbol}:${coin.rank}`).row();
+  }
+  return keyboard.text('None of these', `h:n:${symbol}`);
 }
 
 export function incomeActions(incomeId: string): InlineKeyboard {

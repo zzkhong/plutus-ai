@@ -159,3 +159,22 @@ test("replaceHoldingsForBroker keeps each position's statement price and date, a
   assert.equal(tiger[0].price, 326.57);
   assert.equal(tiger[0].price_as_of?.getTime(), new Date('2026-09-10T00:00:00').getTime());
 });
+
+test("setCoingeckoId prices only the user's own chat-entered holding of that coin, and a re-add keeps it", async () => {
+  const { addHolding, listHoldings, setCoingeckoId } = await import('./service');
+  const { createUser } = await import('../users/service');
+  const other = await createUser('test-portfolio-service-coin-other-chat');
+  const wif = { symbol: 'WIF', name: 'WIF', quantity: 100, asset_class: 'crypto' as const, currency: 'USD' as const, market: 'Crypto' };
+  await addHolding(userId, wif);
+  await addHolding(other.id, wif);
+
+  assert.equal(await setCoingeckoId(userId, 'WIF', 'dogwifhat'), 1);
+  await addHolding(userId, { ...wif, quantity: 150 });
+
+  const mine = (await listHoldings(userId)).find((h) => h.symbol === 'WIF');
+  const theirs = (await listHoldings(other.id)).find((h) => h.symbol === 'WIF');
+  assert.equal(mine?.coingecko_id, 'dogwifhat');
+  assert.equal(mine?.quantity, 150);
+  assert.equal(theirs?.coingecko_id, null);
+  assert.equal(await setCoingeckoId(userId, 'NOPE', 'nope'), 0);
+});

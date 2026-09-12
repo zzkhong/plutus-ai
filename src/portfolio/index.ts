@@ -9,7 +9,7 @@ import { listHoldings } from './service';
 import { PortfolioSummary } from './types';
 
 export * from './types';
-export { addHolding, removeHolding, replaceHoldingsForBroker, listHoldings } from './service';
+export { addHolding, removeHolding, replaceHoldingsForBroker, listHoldings, setCoingeckoId } from './service';
 export { parseStatement, StatementParseError } from './statement-parser';
 export { getPrice } from './price-fetcher';
 export { calculateNetWorth, calculateAllocation, enrichHolding, buildPortfolioSummary } from './calculator';

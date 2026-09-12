@@ -121,3 +121,18 @@ test('withTimeout resolves to null if the wrapped promise never settles within t
   assert.equal(result, null);
   assert.ok(elapsed < 1000, `expected withTimeout to resolve quickly, took ${elapsed}ms`);
 });
+
+test('getPrice prices a coin the user picked on CoinGecko by its stored id', async () => {
+  const net = stubFetch({ dogwifhat: { usd: 1.85, usd_24h_change: 4 } });
+  try {
+    const { getPrice } = await import('./index');
+    const quote = await getPrice(
+      fakeHolding({ symbol: 'WIF', asset_class: 'crypto', broker: null, price: null, coingecko_id: 'dogwifhat' }),
+    );
+
+    assert.equal(quote?.price, 1.85);
+    assert.match(net.urls[0], /ids=dogwifhat&/);
+  } finally {
+    net.restore();
+  }
+});
