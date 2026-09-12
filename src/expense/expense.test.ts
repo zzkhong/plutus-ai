@@ -271,3 +271,74 @@ test('fireRecurringForToday does not fire a 31st charge early in a month that ha
   assert.equal((await fireRecurringForToday(owner.id, new Date(2026, 9, 30, 9, 0))).length, 0);
   assert.equal((await fireRecurringForToday(owner.id, new Date(2026, 9, 31, 9, 0))).length, 1);
 });
+
+test('createRecurring updates the charge for the same merchant instead of adding a second', async () => {
+  const { createUser } = await import('../users/service');
+  const { createRecurring, listRecurring } = await import('./index');
+  const owner = await createUser('test-expense-recurring-upsert-chat');
+  await createRecurring(owner.id, { amount: 15.98, currency: 'MYR', merchant: 'Netflix', category: 'Entertainment', day_of_month: 5 });
+
+  await createRecurring(owner.id, { amount: 17.98, merchant: 'NETFLIX!', day_of_month: 7 });
+
+  assert.deepEqual(
+    (await listRecurring(owner.id)).map((r) => [r.merchant, r.amount, r.currency, r.category, r.day_of_month]),
+    [['Netflix', 1798, 'MYR', 'Entertainment', 7]],
+    'keeps its name, category and currency',
+  );
+});
+
+test('matchRecurring prefers an exact name, else every charge the name partly matches', async () => {
+  const { createUser } = await import('../users/service');
+  const { createRecurring, matchRecurring } = await import('./index');
+  const owner = await createUser('test-expense-recurring-match-chat');
+  const add = (merchant: string, day: number) =>
+    createRecurring(owner.id, { amount: 10, merchant, category: 'Entertainment', day_of_month: day });
+  await add('Disney+', 1);
+  await add('Disney+ Hotstar', 2);
+  await add('YouTube Premium', 3);
+  const names = async (query: string) => (await matchRecurring(owner.id, query)).map((r) => r.merchant);
+
+  assert.deepEqual(await names('disney'), ['Disney+'], 'an exact match wins');
+  assert.deepEqual(await names('hotstar'), ['Disney+ Hotstar']);
+  assert.deepEqual(await names('youtube premium family'), ['YouTube Premium']);
+  assert.deepEqual(await names('dis'), ['Disney+', 'Disney+ Hotstar']);
+  assert.deepEqual(await names('tv'), [], 'short names only match exactly');
+});
+
+test('removeRecurring returns the charge it removed, or null', async () => {
+  const { createUser } = await import('../users/service');
+  const { createRecurring, removeRecurring } = await import('./index');
+  const owner = await createUser('test-expense-recurring-remove-return-chat');
+  const charge = await createRecurring(owner.id, { amount: 10, merchant: 'Gone Soon', category: 'Bills', day_of_month: 4 });
+
+  assert.equal((await removeRecurring(owner.id, charge.id))?.merchant, 'Gone Soon');
+  assert.equal(await removeRecurring(owner.id, charge.id), null);
+});
+
+test('logRecurringIfDue logs a charge due today once, and nothing on another day', async () => {
+  const { createUser } = await import('../users/service');
+  const { createRecurring, logRecurringIfDue } = await import('./index');
+  const owner = await createUser('test-expense-recurring-due-chat');
+  const today = new Date().getDate();
+  const due = await createRecurring(owner.id, { amount: 25, merchant: 'Due Today', category: 'Bills', day_of_month: today });
+  const later = await createRecurring(owner.id, {
+    amount: 25,
+    merchant: 'Due Another Day',
+    category: 'Bills',
+    day_of_month: (today % 28) + 1,
+  });
+
+  assert.equal((await logRecurringIfDue(owner.id, due.id))?.merchant, 'Due Today');
+  assert.equal(await logRecurringIfDue(owner.id, due.id), null, 'not twice');
+  assert.equal(await logRecurringIfDue(owner.id, later.id), null);
+});
+
+test('logRecurringIfDue treats a day the month lacks as due on its last day', async () => {
+  const { createUser } = await import('../users/service');
+  const { createRecurring, logRecurringIfDue } = await import('./index');
+  const owner = await createUser('test-expense-recurring-due-month-end-chat');
+  const charge = await createRecurring(owner.id, { amount: 25, merchant: 'Rent 31st', category: 'Bills', day_of_month: 31 });
+
+  assert.equal(await logRecurringIfDue(owner.id, charge.id, new Date(2025, 8, 29, 9)), null);
+  assert.equal((await logRecurringIfDue(owner.id, charge.id, new Date(2025, 8, 30, 9)))?.merchant, 'Rent 31st');
+});

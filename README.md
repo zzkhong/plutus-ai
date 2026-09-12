@@ -57,8 +57,11 @@ hawker centres and Grab rides, and it keeps everything in SGD for you.
 - **Fix anything recent.** `/recent` lists your last 10 expenses. Tap one to
   change its category or delete it, or reply to it to fix the rest.
 - **Recurring charges log themselves.** *"Netflix $15.98 every 5th"* logs that
-  charge on the 5th of every month. A charge on the 31st is logged on the
-  last day of shorter months. *"Cancel my Netflix"* stops it.
+  charge on the 5th of every month (one added on its due day is logged
+  straight away). A charge on the 31st is logged on the last day of shorter
+  months. Say it again with a new price or day to change it; *"Cancel my
+  Netflix"* stops it. `/recurring`, or *"show my subscriptions"*, lists them
+  all with what they cost a month and a Remove button each.
 - **Apple Pay, automatically** (optional). With an iOS Shortcut, every Apple
   Pay purchase is logged the moment you tap your phone, with the same buttons
   on its confirmation. See [the Shortcut guide](docs/setup/ios-shortcut-setup.md).
@@ -188,6 +191,7 @@ of commands.
 | `/month` | This month's spending by category, and your savings rate |
 | `/budget` | How every budget is doing this month, and where it's heading |
 | `/recent` | Your last 10 expenses, to change or delete any of them |
+| `/recurring` | Your recurring charges and their monthly total, to remove any of them |
 | `/undo` | Remove your most recent expense |
 | `/review` | Last month in review |
 | `/export` | This year's transactions as a CSV file |
@@ -210,7 +214,8 @@ You don't need commands for most things. Just say what you mean:
 | "Salary $5200 came in" · "freelance RM 800" | records income |
 | "How much did I spend this week?" · "…on food this month?" | tells you, with the budget if you have one |
 | "Set food budget to $500" · "Monthly budget $3000" · "Remove my travel budget" | sets or removes a budget |
-| "Netflix $15.98 every 5th" · "Cancel my Spotify" | starts or stops a recurring charge |
+| "Netflix $15.98 every 5th" · "Netflix is now $17.98" · "Cancel my Spotify" | starts, changes or stops a recurring charge |
+| "Show my recurring expenses" · "What subscriptions do I have?" | lists them, same as `/recurring` |
 | "I hold 0.5 BTC" · "cash SGD 5000" | adds a crypto or cash holding |
 | a voice note saying any of the above | does the same |
 

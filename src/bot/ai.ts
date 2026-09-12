@@ -5,7 +5,8 @@
 import { getProviderForUser } from '../llm/provider';
 import { findById } from '../users/service';
 import { logger } from '../utils/logger';
-import { earlierDay, formatDay, isFutureDay, parseIsoDate, toIsoDate } from '../utils/dates';
+import { earlierDay, formatDay, isFutureDay, ordinal, parseIsoDate, toIsoDate } from '../utils/dates';
+import { formatCurrency } from '../config/currencies';
 import {
   formatCategorySpend,
   formatExpenseLine,
@@ -125,7 +126,7 @@ const CLASSIFIER_INSTRUCTION = [
   'The income intent covers money coming in, like "Salary $5200 came in", "got paid RM 4000" or "freelance job $800" — extract amount, currency, and merchant as what the income was (Salary, Freelance, Bonus and so on).',
   'For expense, income and correction, extract date as YYYY-MM-DD when the user says it happened on a day other than today ("yesterday", "last Friday", "on the 3rd"), working it out from the date given with the message; leave date out otherwise.',
   'The holdings intent covers portfolio holdings mentioned in chat, like "I hold 0.5 BTC", "cash SGD 5000" or "I have 10 AAPL shares" — extract symbol (the coin, currency or ticker symbol, never a company name), assetClass (crypto, cash, or stocks_us, stocks_sg or stocks_my when it is a stock or ETF), currency, and amount as the quantity; set action="remove" when the user wants a holding removed.',
-  'The recurring intent covers repeating charges like "Netflix $15.98 every 5th" or "cancel my Spotify subscription" — extract merchant, amount, and dayOfMonth (1-31, the day of the month it recurs on) for a new one, or action="remove" and merchant for cancelling an existing one.',
+  'The recurring intent covers monthly repeating charges: adding or changing one, like "Netflix $15.98 every 5th" or "Netflix is now $17.98" — extract merchant, amount, currency, and dayOfMonth (1-31, the day of the month it recurs on); cancelling one, like "cancel my Spotify subscription" — action="remove" and merchant; or seeing them all, like "show my recurring expenses" or "what subscriptions do I have" — action="list".',
   'The query intent covers spending questions like "how much did I spend this week" or "how much on food this month" — extract period as one of today, week, or month, and category when the question is about one category.',
   'The budget intent sets or removes a monthly budget, like "Set food budget to $500" or "remove my travel budget" — extract category, budgetAmount and currency, and action="remove" for a removal. For a budget on all spending ("monthly budget $3000", "overall budget", "total budget"), set category to Overall.',
   'The correction intent covers fixing a logged expense, like "actually that was $12", "it was in ringgit", "that was Transport" or "that was yesterday" — extract whichever of amount, currency, merchant, category and date the user is changing.',
@@ -361,24 +362,32 @@ async function replyForIntent(
       };
     }
     case 'recurring': {
-      const { createRecurring, listRecurring, removeRecurring } = await import('../expense/service');
+      const { createRecurring, findRecurringForMerchant, logRecurringIfDue, matchRecurring, removeRecurring } =
+        await import('../expense/service');
+
+      // "Show my subscriptions" gets exactly what /recurring shows.
+      if (extracted.action === 'list') {
+        const { handleRecurringCommand } = await import('./commands/recurring');
+        return handleRecurringCommand(userId);
+      }
 
       if (!extracted.merchant) {
-        return `Which recurring merchant? Try "Netflix $15.98 every 5th" or "cancel my Spotify subscription".`;
+        return `Which recurring charge? Try "Netflix $15.98 every 5th" or "cancel my Spotify subscription", or /recurring to see them all.`;
       }
 
       const isRemoval = /remove|delete|cancel|stop/i.test(extracted.action ?? rawText);
 
       if (isRemoval) {
-        const all = await listRecurring(userId);
-        const match = all.find((r) => r.merchant.toLowerCase() === extracted.merchant!.toLowerCase());
-
-        if (!match) {
-          return `I couldn't find a recurring entry for "${extracted.merchant}".`;
+        const matches = await matchRecurring(userId, extracted.merchant);
+        if (matches.length === 0) {
+          return `I couldn't find a recurring charge for "${extracted.merchant}". /recurring shows the ones you have.`;
         }
-
-        await removeRecurring(userId, match.id);
-        return `Done — removed the recurring ${match.merchant} charge.`;
+        if (matches.length > 1) {
+          const names = matches.map((charge) => charge.merchant);
+          return `Which one? You have ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}. Say the full name, or remove it from /recurring.`;
+        }
+        await removeRecurring(userId, matches[0].id);
+        return `Done — removed the recurring ${matches[0].merchant} charge.`;
       }
 
       const amount = extracted.amount ?? 0;
@@ -391,6 +400,8 @@ async function replyForIntent(
         return `Which day of the month does ${extracted.merchant} charge you?`;
       }
 
+      // Saying an existing charge again changes it rather than adding a second one.
+      const previous = await findRecurringForMerchant(userId, extracted.merchant);
       const recurring = await createRecurring(userId, {
         amount,
         currency: currencyFrom(extracted.currency),
@@ -398,7 +409,23 @@ async function replyForIntent(
         day_of_month: dayOfMonth,
       });
 
-      return `Got it — I'll log $${amount.toFixed(2)} at ${recurring.merchant} every month on day ${recurring.day_of_month}.`;
+      const lastDayNote = recurring.day_of_month > 28 ? ' (or the last day, in shorter months)' : '';
+      const schedule = `${formatCurrency(recurring.amount, recurring.currency)} at ${recurring.merchant} on the ${ordinal(recurring.day_of_month)} of every month${lastDayNote}`;
+      const confirmation = previous ? `Updated — I'll now log ${schedule}.` : `Got it — I'll log ${schedule}.`;
+
+      // Due today? The daily job has already run, so log this month's now.
+      const loggedNow = await logRecurringIfDue(userId, recurring.id, now);
+      if (!loggedNow) {
+        return confirmation;
+      }
+      return {
+        text: await withBudgetAlert(
+          userId,
+          `${confirmation}\n\nIt's due today, so I've logged this month's ${formatMoneyWithSgd(loggedNow)} already.`,
+          loggedNow,
+        ),
+        keyboard: transactionActions(loggedNow.id),
+      };
     }
     case 'holdings': {
       const { addHolding, removeHolding, findStatementHolding, StatementHoldingConflictError } = await import(

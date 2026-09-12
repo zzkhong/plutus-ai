@@ -13,6 +13,7 @@
  *   h:g:<SYMBOL>:<rank>   price chat-entered coin <SYMBOL> as the CoinGecko
  *                         coin at market-cap rank <rank>
  *   h:n:<SYMBOL>          leave <SYMBOL> unpriced
+ *   rc:d:<id>             remove recurring charge <id>
  *
  * <ctx> is where the buttons sit: 'c' under a confirmation, 'r' in /recent,
  * which adds a way back to the list. The longest, "t:s:r:" + a UUID +
@@ -38,7 +39,8 @@ export type CallbackAction =
   | { kind: 'recent' }
   | { kind: 'delete-income'; incomeId: string }
   | { kind: 'pick-coin'; symbol: string; rank: number }
-  | { kind: 'skip-coin'; symbol: string };
+  | { kind: 'skip-coin'; symbol: string }
+  | { kind: 'remove-recurring'; recurringId: string };
 
 const ID = /^[0-9a-f-]{36}$/i;
 const SYMBOL = /^[A-Z0-9]{1,15}$/;
@@ -53,6 +55,9 @@ export function parseCallbackData(data: string): CallbackAction | null {
 
   if (data === 'r:l') {
     return { kind: 'recent' };
+  }
+  if (parts[0] === 'rc' && parts[1] === 'd' && parts.length === 3 && ID.test(parts[2])) {
+    return { kind: 'remove-recurring', recurringId: parts[2] };
   }
   if (parts[0] === 'i' && parts[1] === 'd' && parts.length === 3 && ID.test(parts[2])) {
     return { kind: 'delete-income', incomeId: parts[2] };
@@ -120,6 +125,16 @@ export function recentList(entries: Array<{ id: string; label: string }>): Inlin
   const keyboard = new InlineKeyboard();
   for (const entry of entries) {
     keyboard.text(entry.label, `t:v:${entry.id}`).row();
+  }
+  return keyboard;
+}
+
+/** A Remove button for each recurring charge, for /recurring. */
+export function recurringList(charges: Array<{ id: string; merchant: string }>): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  for (const charge of charges) {
+    const name = charge.merchant.length > 28 ? `${charge.merchant.slice(0, 27)}…` : charge.merchant;
+    keyboard.text(`Remove ${name}`, `rc:d:${charge.id}`).row();
   }
   return keyboard;
 }

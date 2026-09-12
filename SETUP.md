@@ -355,6 +355,7 @@ drop-and-recreate, which loses that column's data.
 | `/today` / `/month` | Spending summary; `/month` adds income and savings rate |
 | `/budget` | Each budget this month, and where it's heading |
 | `/recent` | Last 10 expenses, to change or delete |
+| `/recurring` | Recurring charges, to see or remove |
 | `/undo` | Undo your last transaction |
 | `/review` | Last month in review |
 | `/portfolio` | Net worth and allocation |

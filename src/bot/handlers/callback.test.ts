@@ -292,3 +292,78 @@ test('"None of these" leaves the coin unpriced', async () => {
   assert.equal(outcome.text, 'OK — WIF stays without a price, so it counts as S$0 in your net worth.');
   assert.equal(outcome.keyboard, null);
 });
+
+// --- /recurring -------------------------------------------------------------------------------
+
+test('/recurring lists every charge with the monthly total in SGD, and a Remove button each', async () => {
+  const { handleRecurringCommand } = await import('../commands/recurring');
+  const { createRecurring } = await import('../../expense/service');
+  const owner = await approvedUser('test-callback-recurring-chat');
+  const netflix = await createRecurring(owner, { amount: 15.98, merchant: 'Netflix', category: 'Entertainment', day_of_month: 5 });
+  const spotify = await createRecurring(owner, {
+    amount: 17.9,
+    currency: 'MYR',
+    merchant: 'Spotify',
+    category: 'Entertainment',
+    day_of_month: 1,
+  });
+
+  const reply = await handleRecurringCommand(owner);
+
+  assert.equal(
+    reply.text,
+    [
+      'Your 2 recurring charges come to S$21.56 a month:',
+      '  1st · Spotify · RM17.90 (S$5.58) · Entertainment',
+      '  5th · Netflix · S$15.98 · Entertainment',
+      '',
+      'Tap one to remove it. To change one, just say it again, e.g. "Netflix $17.98 every 5th".',
+    ].join('\n'),
+  );
+  assert.deepEqual(
+    (reply.keyboard!.inline_keyboard.flat() as any[]).map((button) => [button.text, button.callback_data]),
+    [
+      ['Remove Spotify', `rc:d:${spotify.id}`],
+      ['Remove Netflix', `rc:d:${netflix.id}`],
+    ],
+  );
+});
+
+test('a Remove button removes that charge and shows the list again', async () => {
+  const { handleCallback } = await import('./callback');
+  const { createRecurring, listRecurring } = await import('../../expense/service');
+  const owner = await approvedUser('test-callback-recurring-remove-chat');
+  const intruder = await approvedUser('test-callback-recurring-intruder-chat');
+  const netflix = await createRecurring(owner, { amount: 15.98, merchant: 'Netflix', category: 'Entertainment', day_of_month: 5 });
+  await createRecurring(owner, { amount: 9.9, merchant: 'Spotify', category: 'Entertainment', day_of_month: 1 });
+
+  const blocked = await handleCallback(intruder, `rc:d:${netflix.id}`);
+  assert.equal(blocked.toast, 'That charge was already removed.');
+  assert.equal((await listRecurring(owner)).length, 2, "another user's press changes nothing");
+
+  const removed = await handleCallback(owner, `rc:d:${netflix.id}`);
+  assert.equal(removed.toast, 'Removed Netflix');
+  assert.match(removed.text ?? '', /^Removed the recurring Netflix charge\.\n\nYour 1 recurring charge comes to S\$9\.90 a month:/);
+  assert.deepEqual(
+    (removed.keyboard!.inline_keyboard.flat() as any[]).map((button) => button.text),
+    ['Remove Spotify'],
+  );
+});
+
+test('/recurring with no charges says how to add one', async () => {
+  const { handleRecurringCommand } = await import('../commands/recurring');
+  const owner = await approvedUser('test-callback-recurring-empty-chat');
+
+  const reply = await handleRecurringCommand(owner);
+
+  assert.match(reply.text, /^No recurring charges yet/);
+  assert.equal(reply.keyboard, undefined);
+});
+
+test('parseCallbackData reads the recurring Remove button', async () => {
+  const { parseCallbackData } = await import('../keyboards');
+  const id = '0b5f8a3e-6a52-4a8e-9a55-4b6f2a1c9d10';
+
+  assert.deepEqual(parseCallbackData(`rc:d:${id}`), { kind: 'remove-recurring', recurringId: id });
+  assert.equal(parseCallbackData('rc:d:not-an-id'), null);
+});

@@ -36,6 +36,7 @@ import { handleSetupCommand, handleSetupTextMessage } from './commands/setup';
 import { handleApproveCommand, handleRejectCommand } from './commands/approve';
 import { handleWebhookKeyCommand } from './commands/webhookkey';
 import { handleRecentCommand } from './commands/recent';
+import { handleRecurringCommand } from './commands/recurring';
 import { handleReviewCommand } from './commands/review';
 import { handleTextMessage } from './handlers/text';
 import { handleVoiceMessage } from './handlers/voice';
@@ -159,6 +160,11 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
   bot.command('recent', async (ctx) => {
     if (!ctx.user) return;
     await sendReply(ctx, await handleRecentCommand(ctx.user.id));
+  });
+
+  bot.command('recurring', async (ctx) => {
+    if (!ctx.user) return;
+    await sendReply(ctx, await handleRecurringCommand(ctx.user.id));
   });
 
   bot.command('review', async (ctx) => {

@@ -11,6 +11,8 @@ import { deleteIncome } from '../../income/service';
 import { findCoinByRank } from '../../portfolio/price-fetcher/crypto';
 import { setCoingeckoId } from '../../portfolio/service';
 import { handleRecentCommand } from '../commands/recent';
+import { handleRecurringCommand } from '../commands/recurring';
+import { removeRecurring } from '../../expense/service';
 import { formatExpenseLine, formatMoneyWithSgd, formatTransactionDetail } from '../formatter/messages';
 import { backToRecent, categoryPicker, parseCallbackData, transactionActions } from '../keyboards';
 
@@ -43,6 +45,19 @@ export async function handleCallback(userId: string, data: string): Promise<Call
       toast: 'Removed',
       text: `Removed ${formatMoneyWithSgd(removed)} of income from ${removed.source}.`,
       keyboard: null,
+    };
+  }
+
+  if (action.kind === 'remove-recurring') {
+    const removed = await removeRecurring(userId, action.recurringId);
+    const list = await handleRecurringCommand(userId);
+    if (!removed) {
+      return { toast: 'That charge was already removed.', text: list.text, keyboard: list.keyboard ?? null };
+    }
+    return {
+      toast: `Removed ${removed.merchant}`,
+      text: `Removed the recurring ${removed.merchant} charge.\n\n${list.text}`,
+      keyboard: list.keyboard ?? null,
     };
   }
 

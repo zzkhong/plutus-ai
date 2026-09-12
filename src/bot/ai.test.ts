@@ -2,7 +2,7 @@ import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { toIsoDate } from '../utils/dates';
+import { ordinal, toIsoDate } from '../utils/dates';
 
 process.env.DATABASE_URL = './data/test-ai-budget.db';
 
@@ -727,7 +727,7 @@ test('the help intent lists every command, not a partial set', async () => {
   const { buildAssistantReply } = await import('./ai');
   const { text: reply } = await buildAssistantReply(userId, { intent: 'help', confidence: 0.9, extracted: {}, rawText: 'help' });
 
-  for (const command of ['/today', '/month', '/budget', '/recent', '/undo', '/review', '/export', '/split', '/digest']) {
+  for (const command of ['/today', '/month', '/budget', '/recent', '/recurring', '/undo', '/review', '/export', '/split', '/digest']) {
     assert.ok(reply.includes(command), `help is missing ${command}`);
   }
 });
@@ -890,4 +890,105 @@ test('an overall budget covers all spending, alerts on it, and can be removed', 
     (await buildAssistantReply(owner, budget('overall', { action: 'remove' }))).text,
     'Done — removed the overall budget.',
   );
+});
+
+// --- recurring charges in chat ----------------------------------------------------------
+
+function recurringIntent(extracted: Record<string, unknown>, rawText = 'recurring charge') {
+  return { intent: 'recurring' as const, confidence: 0.9, extracted, rawText };
+}
+
+test('asking to see recurring charges gives exactly the /recurring reply', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { handleRecurringCommand } = await import('./commands/recurring');
+  const { createRecurring } = await import('../expense/service');
+  const owner = await freshUser('test-ai-recurring-list-chat');
+  await createRecurring(owner, { amount: 15.98, merchant: 'Netflix', category: 'Entertainment', day_of_month: 5 });
+
+  const chat = await buildAssistantReply(owner, recurringIntent({ action: 'list' }, 'show me all my recurring expenses'));
+  const command = await handleRecurringCommand(owner);
+
+  assert.equal(chat.text, command.text);
+  assert.deepEqual(chat.keyboard?.inline_keyboard, command.keyboard?.inline_keyboard);
+  assert.match(chat.text, /Netflix · S\$15\.98/);
+});
+
+test('saying a recurring charge again updates it rather than adding a second one', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { listRecurring } = await import('../expense/service');
+  const owner = await freshUser('test-ai-recurring-update-chat');
+  const notToday = (new Date().getDate() % 28) + 1;
+
+  const first = await withCategorizer(() =>
+    buildAssistantReply(owner, recurringIntent({ amount: 15.98, merchant: 'Netflix', dayOfMonth: notToday })),
+  );
+  const second = await buildAssistantReply(
+    owner,
+    recurringIntent({ amount: 17.98, merchant: 'netflix', dayOfMonth: notToday }, 'Netflix is now $17.98'),
+  );
+
+  assert.equal(first.text, `Got it — I'll log S$15.98 at Netflix on the ${ordinal(notToday)} of every month.`);
+  assert.equal(second.text, `Updated — I'll now log S$17.98 at Netflix on the ${ordinal(notToday)} of every month.`);
+  assert.deepEqual(
+    (await listRecurring(owner)).map((charge) => [charge.merchant, charge.amount]),
+    [['Netflix', 1798]],
+  );
+});
+
+test('a recurring charge in ringgit is confirmed in ringgit', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const owner = await freshUser('test-ai-recurring-myr-chat');
+  const notToday = (new Date().getDate() % 28) + 1;
+
+  const { text } = await withCategorizer(() =>
+    buildAssistantReply(owner, recurringIntent({ amount: 17.9, currency: 'MYR', merchant: 'Spotify', dayOfMonth: notToday })),
+  );
+
+  assert.match(text, /I'll log RM17\.90 at Spotify/);
+});
+
+test('cancelling finds a charge by a looser name, and asks when the name fits more than one', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { createRecurring, listRecurring } = await import('../expense/service');
+  const owner = await freshUser('test-ai-recurring-cancel-chat');
+  await createRecurring(owner, { amount: 9.9, merchant: 'Spotify Family', category: 'Entertainment', day_of_month: 3 });
+  await createRecurring(owner, { amount: 5.9, merchant: 'Spotify Duo', category: 'Entertainment', day_of_month: 12 });
+
+  const ask = await buildAssistantReply(owner, recurringIntent({ merchant: 'spotify', action: 'remove' }, 'cancel spotify'));
+  assert.equal(ask.text, 'Which one? You have Spotify Family and Spotify Duo. Say the full name, or remove it from /recurring.');
+  assert.equal((await listRecurring(owner)).length, 2);
+
+  const done = await buildAssistantReply(
+    owner,
+    recurringIntent({ merchant: 'Spotify Family plan', action: 'remove' }, 'cancel my spotify family plan'),
+  );
+  assert.equal(done.text, 'Done — removed the recurring Spotify Family charge.');
+  assert.deepEqual(
+    (await listRecurring(owner)).map((charge) => charge.merchant),
+    ['Spotify Duo'],
+  );
+});
+
+test('a recurring charge added on its due day is logged straight away, and only once', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { fireRecurringForToday, getRecurringFiredToday } = await import('../expense/service');
+  const owner = await freshUser('test-ai-recurring-due-today-chat');
+  const today = new Date().getDate();
+
+  const first = await withCategorizer(() =>
+    buildAssistantReply(owner, recurringIntent({ amount: 80, currency: 'MYR', merchant: 'Gym Membership', dayOfMonth: today })),
+  );
+
+  assert.match(first.text, /^Got it — I'll log RM80\.00 at Gym Membership on the /);
+  assert.match(first.text, /\n\nIt's due today, so I've logged this month's RM80\.00 \(S\$24\.92\) already\./);
+  assert.ok(first.keyboard, 'with Change category / Undo for the charge just logged');
+  assert.equal((await getRecurringFiredToday(owner)).length, 1);
+  assert.equal((await fireRecurringForToday(owner)).length, 0, 'the daily job then skips it');
+
+  const again = await buildAssistantReply(
+    owner,
+    recurringIntent({ amount: 85, currency: 'MYR', merchant: 'Gym Membership', dayOfMonth: today }),
+  );
+  assert.doesNotMatch(again.text, /due today/, 'changing it the same day does not log it twice');
+  assert.equal((await getRecurringFiredToday(owner)).length, 1);
 });

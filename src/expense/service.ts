@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { and, desc, eq, gt, gte, lt, or, sql } from 'drizzle-orm';
 
 import { SUPPORTED_CURRENCIES, toSGD } from '../config';
+import type { ExchangeRates } from '../config/currencies';
 import { getExchangeRates } from '../fx/rates';
 import { db } from '../db';
 import { transactions, recurring_transactions } from '../db/schema';
@@ -441,11 +442,73 @@ function mapRecurringRow(row: typeof recurring_transactions.$inferSelect): Recur
   };
 }
 
+/** Letters and digits only, lower-cased: "Disney+ Hotstar" and "disney hotstar" are one name. */
+function merchantKey(merchant: string): string {
+  return merchant.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** The user's recurring charge for this merchant, compared ignoring case and punctuation. */
+export async function findRecurringForMerchant(userId: string, merchant: string): Promise<RecurringTransaction | null> {
+  const key = merchantKey(merchant);
+  return (await listRecurring(userId)).find((charge) => merchantKey(charge.merchant) === key) ?? null;
+}
+
+/** Names shorter than this only match exactly, so "tv" can't catch half the list. */
+const MIN_PARTIAL_MATCH = 3;
+
+/**
+ * The user's recurring charges a name refers to: an exact match (ignoring
+ * case and punctuation) if there is one, otherwise every charge whose name
+ * contains it or sits inside it — "Netflix Premium" finds "Netflix",
+ * "spotify" finds "Spotify Family". More than one back means the caller
+ * should ask which.
+ */
+export async function matchRecurring(userId: string, name: string): Promise<RecurringTransaction[]> {
+  const key = merchantKey(name);
+  if (!key) {
+    return [];
+  }
+  const charges = await listRecurring(userId);
+  const exact = charges.filter((charge) => merchantKey(charge.merchant) === key);
+  if (exact.length > 0 || key.length < MIN_PARTIAL_MATCH) {
+    return exact;
+  }
+  return charges.filter((charge) => {
+    const chargeKey = merchantKey(charge.merchant);
+    return chargeKey.length >= MIN_PARTIAL_MATCH && (chargeKey.includes(key) || key.includes(chargeKey));
+  });
+}
+
+/**
+ * Saves a monthly recurring charge. One the user already has for the same
+ * merchant is updated in place — its name, and its category and currency
+ * unless new ones are given, are kept. "Netflix is now $17.98 every 5th"
+ * used to add a second Netflix charge, and both were logged every month.
+ */
 export async function createRecurring(userId: string, data: RecurringInput): Promise<RecurringTransaction> {
   const amount = centsFromAmount(data.amount);
+  const existing = await findRecurringForMerchant(userId, data.merchant);
   const category =
-    data.category ?? (await resolveExpenseCategory(userId, { merchant: data.merchant, amount }));
+    data.category ??
+    existing?.category ??
+    (await resolveExpenseCategory(userId, { merchant: data.merchant, amount }));
   const now = Date.now();
+
+  if (existing) {
+    const [updated] = await db
+      .update(recurring_transactions)
+      .set({
+        amount,
+        currency: data.currency ?? existing.currency,
+        category,
+        day_of_month: data.day_of_month,
+        is_active: data.is_active === false ? 0 : 1,
+        updated_at: now,
+      })
+      .where(and(eq(recurring_transactions.id, existing.id), eq(recurring_transactions.user_id, userId)))
+      .returning();
+    return mapRecurringRow(updated);
+  }
 
   const [inserted] = await db
     .insert(recurring_transactions)
@@ -473,10 +536,13 @@ export async function pauseRecurring(userId: string, id: string): Promise<void> 
     .where(and(eq(recurring_transactions.id, id), eq(recurring_transactions.user_id, userId)));
 }
 
-export async function removeRecurring(userId: string, id: string): Promise<void> {
-  await db
+/** Removes one of the user's recurring charges; returns it, or null if they had no such charge. */
+export async function removeRecurring(userId: string, id: string): Promise<RecurringTransaction | null> {
+  const [removed] = await db
     .delete(recurring_transactions)
-    .where(and(eq(recurring_transactions.id, id), eq(recurring_transactions.user_id, userId)));
+    .where(and(eq(recurring_transactions.id, id), eq(recurring_transactions.user_id, userId)))
+    .returning();
+  return removed ? mapRecurringRow(removed) : null;
 }
 
 export async function listRecurring(userId: string): Promise<RecurringTransaction[]> {
@@ -532,36 +598,88 @@ export async function fireRecurringForToday(userId: string, at: Date = new Date(
   const rates = await getExchangeRates();
   const created: Transaction[] = [];
   for (const recurring of dueRows) {
-    if (alreadyFired.has(recurring.id)) {
-      continue;
+    if (!alreadyFired.has(recurring.id)) {
+      created.push(await insertRecurringCharge(userId, recurring, rates));
     }
-    const amountSgd = toSGD(recurring.amount, recurring.currency as Currency, rates);
-    const now = Date.now();
-
-    const [inserted] = await db
-      .insert(transactions)
-      .values({
-        id: randomUUID(),
-        user_id: userId,
-        amount: recurring.amount,
-        currency: recurring.currency,
-        amount_sgd: amountSgd,
-        merchant: recurring.merchant,
-        category: recurring.category,
-        source: 'recurring',
-        card_name: 'Recurring',
-        note: `Auto-logged recurring: ${recurring.merchant}`,
-        recurring_id: recurring.id,
-        spent_at: now,
-        created_at: now,
-        updated_at: now,
-      })
-      .returning();
-
-    created.push(mapTransactionRow(inserted));
   }
 
   return created;
+}
+
+/** Logs one recurring charge as a transaction, tagged with its template's recurring_id. */
+async function insertRecurringCharge(
+  userId: string,
+  recurring: typeof recurring_transactions.$inferSelect,
+  rates: ExchangeRates,
+): Promise<Transaction> {
+  const now = Date.now();
+  const [inserted] = await db
+    .insert(transactions)
+    .values({
+      id: randomUUID(),
+      user_id: userId,
+      amount: recurring.amount,
+      currency: recurring.currency,
+      amount_sgd: toSGD(recurring.amount, recurring.currency as Currency, rates),
+      merchant: recurring.merchant,
+      category: recurring.category,
+      source: 'recurring',
+      card_name: 'Recurring',
+      note: `Auto-logged recurring: ${recurring.merchant}`,
+      recurring_id: recurring.id,
+      spent_at: now,
+      created_at: now,
+      updated_at: now,
+    })
+    .returning();
+  return mapTransactionRow(inserted);
+}
+
+/** Whether a charge on `dayOfMonth` is due on `at`; a day the month lacks falls on its last day. */
+function isDueOn(dayOfMonth: number, at: Date): boolean {
+  const today = at.getDate();
+  const lastDayOfMonth = new Date(at.getFullYear(), at.getMonth() + 1, 0).getDate();
+  return dayOfMonth === today || (today === lastDayOfMonth && dayOfMonth > lastDayOfMonth);
+}
+
+/**
+ * Logs a recurring charge straight away when it's due today and nothing has
+ * logged it yet today. The daily job runs just after midnight, so without
+ * this a charge added on its due day would wait a month. The job still
+ * skips it later, by recurring_id. Returns the transaction, or null.
+ */
+export async function logRecurringIfDue(userId: string, recurringId: string, at: Date = new Date()): Promise<Transaction | null> {
+  const recurring = await db
+    .select()
+    .from(recurring_transactions)
+    .where(
+      and(
+        eq(recurring_transactions.id, recurringId),
+        eq(recurring_transactions.user_id, userId),
+        eq(recurring_transactions.is_active, 1),
+      ),
+    )
+    .get();
+  if (!recurring || !isDueOn(recurring.day_of_month, at)) {
+    return null;
+  }
+
+  const loggedToday = await db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.user_id, userId),
+        eq(transactions.recurring_id, recurring.id),
+        gte(transactions.created_at, startOfPeriod('today', at)),
+      ),
+    )
+    .get();
+  if (loggedToday) {
+    return null;
+  }
+
+  return insertRecurringCharge(userId, recurring, await getExchangeRates());
 }
 
 export async function getRecurringFiredToday(userId: string): Promise<Transaction[]> {

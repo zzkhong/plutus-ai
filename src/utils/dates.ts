@@ -86,3 +86,13 @@ export function daysInMonth(date: Date): number {
 export function monthKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
+
+/** 1 → "1st", 22 → "22nd", 13 → "13th". */
+export function ordinal(n: number): string {
+  const lastTwo = n % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) {
+    return `${n}th`;
+  }
+  const suffixes: Record<number, string> = { 1: 'st', 2: 'nd', 3: 'rd' };
+  return `${n}${suffixes[n % 10] ?? 'th'}`;
+}

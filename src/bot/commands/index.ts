@@ -11,4 +11,5 @@ export * from './export';
 export * from './undo';
 export * from './help';
 export * from './recent';
+export * from './recurring';
 export * from './review';
