@@ -62,8 +62,8 @@ function loadConfigAndTimezone(env: Record<string, string | undefined>): { confi
 }
 
 test('DATABASE_URL: a bare path is treated as a local SQLite file', () => {
-  const config = loadConfigWith({ ...BASE_ENV, DATABASE_URL: './data/pluto.db' }) as { DATABASE_URL: string };
-  assert.equal(config.DATABASE_URL, 'file:./data/pluto.db');
+  const config = loadConfigWith({ ...BASE_ENV, DATABASE_URL: './data/plutus.db' }) as { DATABASE_URL: string };
+  assert.equal(config.DATABASE_URL, 'file:./data/plutus.db');
 });
 
 test('DATABASE_URL: a Turso URL passes through unchanged when it has an auth token', () => {

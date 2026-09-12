@@ -58,7 +58,7 @@ test('handleDocumentMessage turns away a file type it cannot read, without calli
 
   try {
     const { handleDocumentMessage } = await import('./document');
-    const reply = await handleDocumentMessage(userId, Buffer.from('PK'), 'application/zip', 'archive.zip');
+    const { text: reply } = await handleDocumentMessage(userId, Buffer.from('PK'), 'application/zip', 'archive.zip');
 
     assert.match(reply, /PDF, a screenshot or a CSV/);
     assert.equal(fetchCalled, false);
@@ -75,7 +75,7 @@ test('handleDocumentMessage returns a friendly message when the statement cannot
 
   try {
     const { handleDocumentMessage } = await import('./document');
-    const reply = await handleDocumentMessage(userId, Buffer.from('%PDF-1.4 fake'), 'application/pdf');
+    const { text: reply } = await handleDocumentMessage(userId, Buffer.from('%PDF-1.4 fake'), 'application/pdf');
 
     assert.match(reply, /couldn't read that statement/i);
   } finally {
@@ -98,7 +98,7 @@ test('handleDocumentMessage imports a statement at its prices, and a newer one f
   });
   let reply: string;
   try {
-    reply = await handleDocumentMessage(userId, Buffer.from('Symbol,Quantity\n'), 'text/csv', 'positions.csv');
+    reply = (await handleDocumentMessage(userId, Buffer.from('Symbol,Quantity\n'), 'text/csv', 'positions.csv')).text;
   } finally {
     restore();
   }
@@ -127,4 +127,53 @@ test('handleDocumentMessage imports a statement at its prices, and a newer one f
     replaced.map((h) => [h.symbol, h.quantity, h.price]),
     [['AAPL', 40, 330]],
   );
+});
+
+function stubReplies(replies: unknown[]) {
+  const originalFetch = global.fetch;
+  let call = 0;
+  global.fetch = (async () => {
+    const text = JSON.stringify(replies[Math.min(call++, replies.length - 1)]);
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as unknown as typeof fetch;
+  return () => {
+    global.fetch = originalFetch;
+  };
+}
+
+test('a receipt sent as a file, like an e-receipt PDF, is logged as an expense', async () => {
+  const { handleDocumentMessage } = await import('./document');
+  const restore = stubReplies([
+    { broker: null, statement_date: null, holdings: [] },
+    { isReceipt: true, merchant: 'Grab', total: 18.4, currency: 'SGD', date: null, category: 'Transport' },
+  ]);
+  let reply;
+  try {
+    reply = await handleDocumentMessage(userId, Buffer.from('%PDF-1.4 fake'), 'application/pdf', 'grab-receipt.pdf');
+  } finally {
+    restore();
+  }
+
+  assert.match(reply.text, /^Logged S\$18\.40 at Grab under Transport from your receipt\./);
+  assert.ok(reply.keyboard);
+});
+
+test('a file that is neither a statement nor a receipt says so and logs nothing', async () => {
+  const { handleDocumentMessage } = await import('./document');
+  const { listRecentTransactions } = await import('../../expense/service');
+  const before = (await listRecentTransactions(userId, 50)).length;
+  const restore = stubReplies([{ broker: null, statement_date: null, holdings: [] }, { isReceipt: false }]);
+  let reply;
+  try {
+    reply = await handleDocumentMessage(userId, Buffer.from('fake png'), 'image/png', 'cat.png');
+  } finally {
+    restore();
+  }
+
+  assert.match(reply.text, /doesn't look like a brokerage statement or a receipt/);
+  assert.equal(reply.keyboard, undefined);
+  assert.equal((await listRecentTransactions(userId, 50)).length, before);
 });

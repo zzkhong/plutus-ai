@@ -523,3 +523,19 @@ test('GET /api/cron/review runs the month review job with the right token', asyn
   assert.equal(ok.status, 200);
   assert.equal(reviews, 1);
 });
+
+test('POST /api/apple-pay takes a bare "$" amount as the card\'s currency or SGD, not USD', async () => {
+  const { createWebhookApp } = await import('./index');
+  const app = createWebhookApp(null);
+  const post = async (amount: string) => {
+    const res = await app.request('/api/apple-pay', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': approvedKey },
+      body: JSON.stringify({ amount, merchant: 'Toast Box', card: 'Citi Rewards' }),
+    });
+    return ((await res.json()) as any).transaction.currency;
+  };
+
+  assert.equal(await post('$4.50'), 'SGD', 'how a Singapore iPhone writes S$4.50');
+  assert.equal(await post('US$10.00'), 'USD');
+});

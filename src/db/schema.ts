@@ -4,6 +4,7 @@
 
 import { sql } from 'drizzle-orm';
 import {
+  index,
   sqliteTable,
   text,
   integer,
@@ -56,7 +57,7 @@ export const transactions = sqliteTable('transactions', {
   updated_at: integer('updated_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
-});
+}, (t) => [index('transactions_user_created_idx').on(t.user_id, t.created_at)]);
 
 // Money coming in (salary, freelance, refunds), for /month's savings rate and
 // the month-end review. Kept apart from transactions so an income can never
@@ -75,7 +76,7 @@ export const income = sqliteTable('income', {
   created_at: integer('created_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
-});
+}, (t) => [index('income_user_received_idx').on(t.user_id, t.received_at)]);
 
 // Holdings (portfolio) table
 export const holdings = sqliteTable('holdings', {
@@ -105,7 +106,7 @@ export const holdings = sqliteTable('holdings', {
   updated_at: integer('updated_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
-});
+}, (t) => [index('holdings_user_idx').on(t.user_id)]);
 
 // Budgets table
 export const budgets = sqliteTable('budgets', {
@@ -124,7 +125,7 @@ export const budgets = sqliteTable('budgets', {
   updated_at: integer('updated_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
-});
+}, (t) => [index('budgets_user_category_idx').on(t.user_id, t.category)]);
 
 // Budget alert dedup table — one row per (budget, threshold, month) once sent
 export const budget_alerts = sqliteTable('budget_alerts', {
@@ -140,7 +141,7 @@ export const budget_alerts = sqliteTable('budget_alerts', {
   sent_at: integer('sent_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
-});
+}, (t) => [index('budget_alerts_budget_idx').on(t.budget_id, t.threshold, t.month)]);
 
 // Recurring transactions table
 export const recurring_transactions = sqliteTable('recurring_transactions', {
@@ -160,7 +161,7 @@ export const recurring_transactions = sqliteTable('recurring_transactions', {
   updated_at: integer('updated_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
-});
+}, (t) => [index('recurring_transactions_user_idx').on(t.user_id)]);
 
 // In-progress /split conversations, one row per chat. Persisted rather than
 // held in memory because on Vercel consecutive messages can reach different
@@ -180,3 +181,16 @@ export const fx_rates = sqliteTable('fx_rates', {
   rates: text('rates').notNull(), // JSON: units of each currency per 1 SGD
   fetched_at: integer('fetched_at').notNull(),
 });
+
+// Telegram updates being handled right now, one row each, so a chat's
+// updates run in the order they were sent — see src/bot/middleware/sequence.ts.
+// A row lives only while its update is handled.
+export const chat_updates = sqliteTable(
+  'chat_updates',
+  {
+    update_id: integer('update_id').primaryKey(), // Telegram's update_id, which only increases
+    chat_id: text('chat_id').notNull(),
+    started_at: integer('started_at').notNull(),
+  },
+  (t) => [index('chat_updates_chat_idx').on(t.chat_id, t.update_id)],
+);

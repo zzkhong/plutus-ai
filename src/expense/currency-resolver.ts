@@ -1,11 +1,20 @@
 /**
  * Currency detection and resolution for expenses.
+ *
+ * Only a whole marker counts: the "rm" inside "Supermarket" or "Pharmacy" is
+ * not a ringgit sign. And a bare "$" says nothing at all — a Singapore iPhone
+ * writes S$4.50 as "$4.50" — so it falls through to the card's currency, then
+ * SGD. Both used to be misread: every FairPrice Supermarket expense came out
+ * in ringgit, and an Apple Pay "$4.50" in US dollars.
  */
 
 import { Currency } from '../types';
 import { DEFAULT_CARD_CURRENCY_MAP } from '../config';
 
-const EXPLICIT_CURRENCY_RE = /(SGD|USD|MYR|RM|\$)/i;
+// Not preceded by a letter; a letter code must not be followed by one either.
+const MYR_MARKER = /(?<![a-z])(?:rm|myr)(?![a-z])/i;
+const USD_MARKER = /(?<![a-z])(?:usd(?![a-z])|us\$)/i;
+const SGD_MARKER = /(?<![a-z])(?:sgd(?![a-z])|s\$)/i;
 
 export function detectCurrencyFromCard(cardName?: string): Currency | undefined {
   if (!cardName) {
@@ -22,25 +31,20 @@ export function detectCurrencyFromCard(cardName?: string): Currency | undefined 
   return DEFAULT_CARD_CURRENCY_MAP[matchedKey];
 }
 
+/** The currency a piece of text names — "RM 45", "US$10", "S$20" — or undefined. */
 export function detectCurrencyFromText(text?: string): Currency | undefined {
   if (!text) {
     return undefined;
   }
-
-  const normalized = text.trim();
-  if (/RM|MYR/i.test(normalized)) {
+  if (MYR_MARKER.test(text)) {
     return 'MYR';
   }
-  if (/USD|US\$|\$\s?\d/i.test(normalized)) {
+  if (USD_MARKER.test(text)) {
     return 'USD';
   }
-  if (/SGD|S\$/i.test(normalized)) {
+  if (SGD_MARKER.test(text)) {
     return 'SGD';
   }
-  if (/\$\s?\d/i.test(normalized) && !/(RM|MYR|USD|SGD|S\$)/i.test(normalized)) {
-    return 'USD';
-  }
-
   return undefined;
 }
 
@@ -59,8 +63,7 @@ export function resolveCurrency(input: {
     return cardCurrency;
   }
 
-  const textCandidate = `${input.note ?? ''} ${input.merchant ?? ''}`;
-  const explicitFromText = detectCurrencyFromText(textCandidate);
+  const explicitFromText = detectCurrencyFromText(`${input.note ?? ''} ${input.merchant ?? ''}`);
   if (explicitFromText) {
     return explicitFromText;
   }
@@ -68,22 +71,7 @@ export function resolveCurrency(input: {
   return 'SGD';
 }
 
+/** The currency an amount string names, like the Apple Pay Shortcut's "RM45.00"; undefined for a bare "$4.50". */
 export function parseExplicitCurrency(text?: string): Currency | undefined {
-  if (!text) {
-    return undefined;
-  }
-
-  if (/RM|MYR/i.test(text)) {
-    return 'MYR';
-  }
-  if (/SGD|S\$/i.test(text)) {
-    return 'SGD';
-  }
-  if (/USD|US\$/i.test(text) || (text.includes('$') && !/RM|MYR|SGD|S\$/i.test(text))) {
-    return 'USD';
-  }
-
-  return undefined;
+  return detectCurrencyFromText(text);
 }
-
-export const EXPLICIT_CURRENCY_PATTERN = EXPLICIT_CURRENCY_RE;

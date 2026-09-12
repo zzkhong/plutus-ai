@@ -44,7 +44,7 @@ export async function generateSummaryLine(userId: string, data: DigestData): Pro
     const text = (
       await provider.generateText({
         systemInstruction:
-          'You are Pluto AI, a personal finance assistant. Reply with exactly one short plain-text sentence, no markdown, no quotes.',
+          'You are Plutus AI, a personal finance assistant. Reply with exactly one short plain-text sentence, no markdown, no quotes.',
         contents: [{ text: buildPrompt(data) }],
         timeoutMs: 5000,
       })

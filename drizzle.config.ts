@@ -5,7 +5,7 @@ dotenv.config();
 
 // Mirrors normalizeDatabaseUrl in src/config/env.ts. Inlined because
 // importing src/config would demand ENCRYPTION_KEY just to generate SQL.
-const rawUrl = process.env.DATABASE_URL || 'file:./data/pluto.db';
+const rawUrl = process.env.DATABASE_URL || 'file:./data/plutus.db';
 const url = /^(file|libsql|https?|wss?):/i.test(rawUrl) ? rawUrl : `file:${rawUrl}`;
 
 export default {

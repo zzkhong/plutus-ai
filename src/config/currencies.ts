@@ -20,15 +20,18 @@ export const SUPPORTED_CURRENCIES: Currency[] = ['SGD', 'MYR', 'USD'];
 // Base currency for normalization
 export const BASE_CURRENCY: Currency = 'SGD';
 
-// Card to currency mapping
+/**
+ * Cards whose billing currency is known, matched against the card name the
+ * Apple Pay Shortcut sends. Only cards that always bill in one currency
+ * belong here; any other card falls back to the amount's own marker, then
+ * SGD. Crypto.com, Binance and Gemini cards used to be listed as USD, and
+ * were removed: what they bill in depends on where the card was issued.
+ */
 export const DEFAULT_CARD_CURRENCY_MAP: Record<string, Currency> = {
   'OCBC iPhone': 'SGD',
   'OCBC': 'SGD',
   'DBS': 'SGD',
   'UOB': 'SGD',
-  'Crypto.com': 'USD',
-  'Binance': 'USD',
-  'Gemini': 'USD',
 };
 
 /** How many units of each currency 1 SGD buys. */

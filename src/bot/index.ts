@@ -22,6 +22,7 @@ import { config } from '../config';
 import { logger } from '../utils/logger';
 import { BotContext } from './context';
 import { authMiddleware } from './middleware/auth';
+import { chatSequencer } from './middleware/sequence';
 import { errorHandlerMiddleware } from './middleware/error';
 import { formatHelpMessage } from './formatter/messages';
 import { handlePortfolioCommand } from './commands/portfolio';
@@ -85,6 +86,8 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
 
   const bot = new Bot<BotContext>(token);
 
+  // Each chat's updates one at a time, in order, before anything reads or writes.
+  bot.use(chatSequencer);
   bot.use(authMiddleware);
   bot.use(errorHandlerMiddleware);
 
@@ -253,7 +256,7 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
     if (!ctx.user) return;
     const document = ctx.message.document;
     const buffer = await downloadTelegramFile(bot, document.file_id);
-    await ctx.reply(await handleDocumentMessage(ctx.user.id, buffer, document.mime_type ?? '', document.file_name));
+    await sendReply(ctx, await handleDocumentMessage(ctx.user.id, buffer, document.mime_type ?? '', document.file_name));
   });
 
   bot.on('message:photo', async (ctx) => {

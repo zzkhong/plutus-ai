@@ -1,6 +1,11 @@
 /**
  * Resolves the calling chat's users row and gates access by status.
- * Unregistered and pending-approval chats can only reach /setup and /help.
+ *
+ * - Unregistered and pending-approval chats can only reach /setup and /help.
+ * - A chat part-way through /setup can also send the text replies the setup
+ *   conversation asks for, but nothing else yet: without an API key there's
+ *   nothing to read a photo, voice note or file with, and no account for a
+ *   command or button to act on.
  */
 
 import { NextFunction } from 'grammy';
@@ -28,6 +33,16 @@ export async function authMiddleware(ctx: BotContext, next: NextFunction): Promi
       return;
     }
     await ctx.reply(user ? 'Still waiting on admin approval — hang tight!' : 'Run /setup to get started.');
+    return;
+  }
+
+  const isSetupReply = text !== undefined && !text.startsWith('/');
+  if (user.status === 'onboarding' && !isSetupOrHelp && !isSetupReply) {
+    await ctx.reply(
+      user.llm_provider
+        ? 'Finish setting up first: send me your Gemini API key, or /setup to start again.'
+        : 'Finish setting up first: reply "gemini" to pick your provider, or /setup to start again.',
+    );
     return;
   }
 

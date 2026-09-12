@@ -7,7 +7,7 @@ Plutus AI is one TypeScript codebase that runs in two ways:
 | Entrypoint | [`src/app.ts`](../src/app.ts), default-exports the Hono app | [`src/standalone.ts`](../src/standalone.ts), one long-running Node process |
 | Telegram updates | Telegram **pushes** them to `POST /api/telegram` (webhook) | The process **long-polls** Telegram |
 | Scheduled jobs | **Vercel Cron** calls `GET /api/cron/recurring`, `/digest` and `/review` | **node-cron** inside the process |
-| Database | **Turso** (hosted libSQL), Tokyo | A local SQLite **file** (`file:./data/pluto.db`) |
+| Database | **Turso** (hosted libSQL), Tokyo | A local SQLite **file** (`file:./data/plutus.db`) |
 | Migrations | During the Vercel build (`npm run vercel-build`) | On process startup |
 | Apple Pay URL | `https://<project>.vercel.app/api/apple-pay` | `http://localhost:3000/api/apple-pay` (tunnel it to reach it from a phone) |
 
@@ -70,7 +70,7 @@ flowchart LR
         http["HTTP server :3000<br/>/api/apple-pay, /api/health"]
     end
     poll -- "getUpdates" --> tgapi
-    proc --> file[("SQLite file<br/>./data/pluto.db")]
+    proc --> file[("SQLite file<br/>./data/plutus.db")]
     proc --> gemini["Google Gemini API"]
 ```
 
@@ -296,6 +296,11 @@ clears it along with the user's other rows.
 - **Button data is untrusted.** A button's callback data comes back from the
   client, so every action it triggers looks the transaction up by id *and* the
   pressing user's id. A forged id for someone else's expense finds nothing.
+- **Each chat's messages are handled in order.** The webhook acknowledges
+  every update at once, so two messages sent seconds apart would otherwise
+  run at the same time on different instances. Each update registers in the
+  `chat_updates` table and waits for its chat's earlier ones, so "actually
+  that was $5" always applies to the expense just sent.
 - **An expense has two times.** `spent_at` is when the money was spent
   ("yesterday", a receipt's date); totals, budgets and the review use it.
   `created_at` is when it was logged; `/undo` and `/recent` use that. Queries

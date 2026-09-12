@@ -235,3 +235,21 @@ test('listRecentTransactions lists the newest logged first, up to the limit', as
     ['Third', 'Second'],
   );
 });
+
+test('a multi-purpose merchant like Grab takes its category from each message, not from history', async () => {
+  const { logExpense } = await import('./service');
+  const { isMultiPurposeMerchant } = await import('./categorizer');
+  const owner = await approvedUser('test-editing-grab-chat');
+  await logExpense(owner, { amount: 18, merchant: 'Grab', source: 'text', categoryHint: 'Transport' });
+
+  const { result, calls } = await countLlmCalls(() =>
+    logExpense(owner, { amount: 25, merchant: 'Grab', source: 'text', categoryHint: 'Food' }),
+  );
+
+  assert.equal(result.category, 'Food', '"Grab 25 lunch" after a ride is still Food');
+  assert.equal(calls, 0);
+  for (const merchant of ['Grab', 'GrabFood', 'Shopee', '7-Eleven', 'Lazada']) {
+    assert.equal(isMultiPurposeMerchant(merchant), true, merchant);
+  }
+  assert.equal(isMultiPurposeMerchant('Toast Box'), false);
+});

@@ -13,7 +13,7 @@ export class AssignmentParseError extends Error {}
 
 function buildSystemInstruction(items: ReceiptItem[]): string {
   const itemList = items.map((item) => `- ${item.name} ($${item.price.toFixed(2)})`).join('\n');
-  return `You are helping split a restaurant bill for Pluto AI. Here are the receipt's line items:
+  return `You are helping split a restaurant bill for Plutus AI. Here are the receipt's line items:
 ${itemList}
 
 The user will describe how to split the bill, either as a headcount for an even split (e.g. "split between 3") or by saying who had what (e.g. "Alice had the burger, I had the salad, split the fries between us"). Return strict JSON only, matching exactly this shape:

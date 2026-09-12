@@ -122,7 +122,7 @@ function safeJsonParse(text: string): Partial<IntentAnalysis> | null {
 const CLASSIFIER_INSTRUCTION = [
   'You are Plutus AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only, with fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action, symbol, assetClass, currency, dayOfMonth, date }, rawText.',
   'Allowed intents: expense, income, query, budget, correction, recurring, holdings, help, unknown.',
-  'The expense intent covers money spent, like "Spent $4.50 at Ya Kun" or "Grab 18 yesterday" — extract amount, merchant, currency, and category as the best category for it.',
+  'The expense intent covers money spent, like "Spent $4.50 at Ya Kun" or "Grab 18 yesterday" — extract amount, merchant, currency, and category as the best category for it. For a merchant people buy many kinds of things from, like Grab or Shopee, judge the category by what the message says it was for ("Grab 25 lunch" is Food, "Grab 18 to work" is Transport).',
   'The income intent covers money coming in, like "Salary $5200 came in", "got paid RM 4000" or "freelance job $800" — extract amount, currency, and merchant as what the income was (Salary, Freelance, Bonus and so on).',
   'For expense, income and correction, extract date as YYYY-MM-DD when the user says it happened on a day other than today ("yesterday", "last Friday", "on the 3rd"), working it out from the date given with the message; leave date out otherwise.',
   'The holdings intent covers portfolio holdings mentioned in chat, like "I hold 0.5 BTC", "cash SGD 5000" or "I have 10 AAPL shares" — extract symbol (the coin, currency or ticker symbol, never a company name), assetClass (crypto, cash, or stocks_us, stocks_sg or stocks_my when it is a stock or ETF), currency, and amount as the quantity; set action="remove" when the user wants a holding removed.',
@@ -130,7 +130,7 @@ const CLASSIFIER_INSTRUCTION = [
   'The query intent covers spending questions like "how much did I spend this week" or "how much on food this month" — extract period as one of today, week, or month, and category when the question is about one category.',
   'The budget intent sets or removes a monthly budget, like "Set food budget to $500" or "remove my travel budget" — extract category, budgetAmount and currency, and action="remove" for a removal. For a budget on all spending ("monthly budget $3000", "overall budget", "total budget"), set category to Overall.',
   'The correction intent covers fixing a logged expense, like "actually that was $12", "it was in ringgit", "that was Transport" or "that was yesterday" — extract whichever of amount, currency, merchant, category and date the user is changing.',
-  'A category is one of Food, Transport, Groceries, Entertainment, Bills, Health, Education, Travel, Shopping or Others; a currency is SGD, MYR (ringgit, RM) or USD. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
+  'A category is one of Food, Transport, Groceries, Entertainment, Bills, Health, Education, Travel, Shopping or Others; a currency is SGD, MYR (ringgit, RM) or USD (US$) — a bare "$" means SGD, as it does in Singapore, so leave currency out for it. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
 ].join(' ');
 
 /** `now` is injectable for tests; the classifier needs today's date to resolve "yesterday". */

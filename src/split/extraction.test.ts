@@ -17,7 +17,7 @@ if (fs.existsSync(testDbPath)) {
 // position, so a static `import ... from './extraction'` here — even placed
 // after the process.env.DATABASE_URL assignment above — would still resolve
 // before that assignment runs and silently connect to the real dev
-// ./data/pluto.db instead of this test's db. Importing dynamically inside
+// ./data/plutus.db instead of this test's db. Importing dynamically inside
 // before() (which runs after the assignment) avoids that.
 type ExtractionModule = typeof import('./extraction');
 let parseGeminiReceiptResponse: ExtractionModule['parseGeminiReceiptResponse'];

@@ -117,3 +117,28 @@ test('authMiddleware attaches the user and calls next for an approved chat', asy
   assert.equal(nextCalled, true);
   assert.equal(ctx.user!.status, 'approved');
 });
+
+test('authMiddleware lets a chat part-way through /setup send only setup replies, /setup and /help', async () => {
+  const { createUser } = await import('../../users/service');
+  await createUser('9007');
+  const { authMiddleware } = await import('./auth');
+
+  const cases: Array<[string | undefined, boolean]> = [
+    ['gemini', true],
+    ['/setup', true],
+    ['/help', true],
+    ['/today', false],
+    [undefined, false], // a photo, voice note, file or button press
+  ];
+  for (const [text, allowed] of cases) {
+    const { ctx, replies } = fakeCtx(9007, text);
+    let nextCalled = false;
+    await authMiddleware(ctx, async () => {
+      nextCalled = true;
+    });
+    assert.equal(nextCalled, allowed, text ?? 'a message without text');
+    if (!allowed) {
+      assert.match(replies[0], /Finish setting up first: reply "gemini"/);
+    }
+  }
+});

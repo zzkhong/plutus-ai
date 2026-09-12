@@ -20,6 +20,9 @@ import { ParsedHolding, ParsedStatement, SkippedPosition } from './types';
 
 export class StatementParseError extends Error {}
 
+/** The file was read, but isn't an investment statement — perhaps a receipt sent as a file. */
+export class NotAStatementError extends StatementParseError {}
+
 export type StatementFileKind = 'pdf' | 'image' | 'text';
 
 export interface StatementFile {
@@ -38,7 +41,7 @@ const MAX_TEXT_CHARS = 200_000;
 // prompt. This stays well inside Vercel's function time limit.
 const PARSE_TIMEOUT_MS = 90_000;
 
-const SYSTEM_INSTRUCTION = `You read brokerage and investment statements for Pluto AI, a personal finance assistant. The file can come from any broker or platform and be laid out any way: a PDF statement, a screenshot of a positions screen, or a CSV or text export. Read it the way a person would and find the positions the account holds, wherever and however the file lists them. Do not assume any particular section names, column order or broker.
+const SYSTEM_INSTRUCTION = `You read brokerage and investment statements for Plutus AI, a personal finance assistant. The file can come from any broker or platform and be laid out any way: a PDF statement, a screenshot of a positions screen, or a CSV or text export. Read it the way a person would and find the positions the account holds, wherever and however the file lists them. Do not assume any particular section names, column order or broker.
 
 Return strict JSON only, in exactly this shape:
 {"broker": string | null, "statement_date": "YYYY-MM-DD" | null, "holdings": [{"symbol": string, "name": string, "quantity": number, "price": number | null, "market_value": number | null, "currency": string, "asset_class": "stocks_us" | "stocks_sg" | "stocks_my" | "other", "market": string | null}]}
@@ -114,7 +117,7 @@ export function parseStatementResponse(rawText: string, now: Date = new Date()):
   const rawHoldings = Array.isArray(parsed.holdings) ? (parsed.holdings as unknown[]) : [];
   const broker = typeof parsed.broker === 'string' ? normalizeBroker(parsed.broker) : '';
   if (!broker || rawHoldings.length === 0) {
-    throw new StatementParseError("it doesn't look like an investment statement with positions in it");
+    throw new NotAStatementError("it doesn't look like an investment statement with positions in it");
   }
 
   const holdings: ParsedHolding[] = [];

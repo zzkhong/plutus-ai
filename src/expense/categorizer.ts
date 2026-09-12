@@ -116,3 +116,16 @@ Return only valid JSON with keys: category, confidence (0-1).`,
     return 'Others';
   }
 }
+
+/**
+ * Merchants people pay for different kinds of things: Grab for rides, food
+ * and groceries; Shopee or 7-Eleven for almost anything. Remembering the last
+ * category for these would file every GrabFood order under Transport after
+ * one ride, so their category always comes from the message instead.
+ */
+const MULTI_PURPOSE_MERCHANTS = ['grab', 'gojek', 'shopee', 'lazada', 'amazon', 'taobao', '7eleven', 'paypal'];
+
+export function isMultiPurposeMerchant(merchant: string): boolean {
+  const key = merchant.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return MULTI_PURPOSE_MERCHANTS.some((name) => key.startsWith(name));
+}

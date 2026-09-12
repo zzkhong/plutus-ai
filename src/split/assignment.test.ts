@@ -16,7 +16,7 @@ if (fs.existsSync(testDbPath)) {
 // static imports above all other top-level code regardless of source
 // position, so a static top-level `import ... from './assignment'` would
 // still resolve before the process.env.DATABASE_URL assignment above runs
-// and silently connect to the real dev ./data/pluto.db instead of this
+// and silently connect to the real dev ./data/plutus.db instead of this
 // test's db. Importing dynamically inside before() (which runs after the
 // assignment) avoids that.
 type AssignmentModule = typeof import('./assignment');

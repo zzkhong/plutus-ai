@@ -8,6 +8,7 @@ import { db } from '../db';
 import {
   budget_alerts,
   budgets,
+  chat_updates,
   holdings,
   income,
   recurring_transactions,
@@ -132,6 +133,7 @@ export async function reject(userId: string): Promise<void> {
     db.delete(recurring_transactions).where(eq(recurring_transactions.user_id, userId)),
     db.delete(holdings).where(eq(holdings.user_id, userId)),
     db.delete(split_sessions).where(eq(split_sessions.chat_id, user?.telegram_chat_id ?? '')),
+    db.delete(chat_updates).where(eq(chat_updates.chat_id, user?.telegram_chat_id ?? '')),
     db.delete(users).where(eq(users.id, userId)),
   ]);
 }

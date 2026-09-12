@@ -44,11 +44,13 @@ hawker centres and Grab rides, and it keeps everything in SGD for you.
   in one of Food, Transport, Groceries, Entertainment, Bills, Health,
   Education, Travel, Shopping or Others. Once you've logged a merchant, the
   next expense there goes to the same category, including any change you
-  made to it.
+  made to it. (Not for places you buy all sorts from, like Grab or Shopee:
+  those follow what your message says, so "Grab 25 lunch" is Food.)
 - **Three currencies.** Spend in SGD, MYR or USD. Everything is also stored in
   SGD at that day's exchange rate, so your totals and budgets always add up,
   and the reply shows both: *"Logged RM45.00 (S$14.02) at Kopitiam under
-  Food."*
+  Food."* A plain "$" counts as Singapore dollars; say US$ or USD for US
+  dollars.
 - **One tap to fix it.** Every expense Plutus logs comes with **Change
   category** and **Undo** buttons. To change the amount, merchant or date,
   reply to that message: *"it was $12"*, *"that was yesterday"*. Or just say
@@ -228,7 +230,13 @@ You don't need commands for most things. Just say what you mean:
   older, use its buttons or `/recent`.
 - **"This week" means the last 7 days**, and the answer says so.
 - **Photos are receipts.** A photo is logged as an expense unless a `/split`
-  is waiting for it. Brokerage statements must be sent as a file.
+  is waiting for it. A receipt sent as a file, such as a PDF e-receipt, is
+  logged too. Brokerage statements must be sent as a file.
+- **Messages are handled in the order you send them**, so a quick "actually
+  that was $5" always applies to the expense you just sent.
+- **Your messages are read by Google Gemini, using your own key.** On
+  Gemini's free tier, Google may use what's sent to improve its products;
+  keys from a Google Cloud project with billing enabled aren't used that way.
 - **Your data is yours alone.** Everyone registered with the same bot has
   completely separate expenses, income, budgets and holdings. Your Gemini key
   is stored encrypted and only used for your own messages.

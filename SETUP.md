@@ -204,7 +204,7 @@ Fill in `.env`:
 
 ```ini
 ENCRYPTION_KEY=<any 64-hex value; a different one from production is fine>
-DATABASE_URL=file:./data/pluto.db
+DATABASE_URL=file:./data/plutus.db
 TELEGRAM_BOT_TOKEN=<your DEVELOPMENT bot token>
 ADMIN_CHAT_ID=<your chat ID>
 APP_TIMEZONE=Asia/Singapore
@@ -327,7 +327,7 @@ turso db shell plutus .dump > plutus-backup-$(date +%F).sql
 - **Production:** in Turso, destroy the database and create a new one with the
   same name. Create a new token, update `DATABASE_AUTH_TOKEN` in Vercel, and
   redeploy. The redeploy recreates the tables. Everyone runs `/setup` again.
-- **Local:** stop `npm run dev`, delete `data/pluto.db`, and start it again.
+- **Local:** stop `npm run dev`, delete `data/plutus.db`, and start it again.
 
 When you change `src/db/schema.ts`, run `npm run db:generate` and **read the
 SQL it produces** before deploying. A new `NOT NULL` column needs a default or
@@ -343,9 +343,13 @@ drop-and-recreate, which loses that column's data.
 - **Vercel Hobby:** for personal, non-commercial use. Scheduled jobs run once
   at some point within the scheduled hour, so the 22:00 digest arrives between
   22:00 and 22:59, and the month review between 09:00 and 09:59 on the 1st.
+  If a run is skipped altogether, the next night's recurring job logs the
+  charges it missed, dated the day they fell due.
 - **Gemini free tier:** rate-limited per key. Plutus makes one call per chat
   message or voice note, none to categorize a merchant a user has logged
-  before, and one per receipt photo.
+  before, and one per receipt photo. On the free tier, Google may use what's
+  sent to improve its products; keys from a Google Cloud project with billing
+  enabled aren't used that way. Tell your testers before they start.
 
 ## Command reference
 
@@ -406,9 +410,12 @@ That chat isn't registered yet. If you expected to be admin, check that
 **"Still waiting on admin approval".**
 The admin needs to `/approve <your chat_id>`.
 
-**"That key didn't work — the provider rejected it".**
+**"That key didn't work — Google rejected it".**
 Check the key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
-The free tier is rate-limited, so a heavily used key can fail validation.
+If the bot instead says it *couldn't check* the key, or that the key is over
+its rate limit, the key itself is fine. Vercel's logs show the cause under
+"Gemini API key check failed"; a model-not-found error there means the pinned
+model id needs updating (see the last item below).
 
 **"I couldn't read a receipt total…"**
 The photo wasn't clear enough, wasn't a receipt, or was in a currency other
@@ -420,7 +427,7 @@ spreadsheet export fails, export it as PDF or CSV instead. Positions in an
 unsupported currency or market are skipped and listed rather than imported.
 
 **Local: `table budgets already exists` on startup.**
-`data/pluto.db` was created by an older version of the app. Delete it.
+`data/plutus.db` was created by an older version of the app. Delete it.
 
 **Gemini classification suddenly failing for everyone.**
 The model id is pinned in [src/llm/gemini.ts](src/llm/gemini.ts), and Gemini

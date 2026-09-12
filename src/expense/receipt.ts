@@ -28,7 +28,7 @@ const VALID_CURRENCIES = new Set(['SGD', 'MYR', 'USD']);
 
 const SYSTEM_INSTRUCTION = `You read receipts for a personal finance assistant used in Singapore and Malaysia. From the photo, extract the merchant, the final total actually paid (after discounts, including tax and service charge), its currency, the date printed on the receipt, and the best expense category. Return strict JSON only, exactly this shape:
 {"isReceipt": true, "merchant": string | null, "total": number, "currency": "SGD" | "MYR" | "USD" | other ISO 4217 code, "date": "YYYY-MM-DD" | null, "category": ${VALID_CATEGORIES.map((c) => `"${c}"`).join(' | ')}}
-The total is a plain decimal number with no currency symbol. If the photo is not a receipt, bill or invoice, or its total is unreadable, return {"isReceipt": false}.`;
+The total is a plain decimal number with no currency symbol. Singapore receipts usually print Singapore dollars as a plain "$": that is SGD, unless the receipt says US$ or USD. If the photo is not a receipt, bill or invoice, or its total is unreadable, return {"isReceipt": false}.`;
 
 export function parseReceiptExpense(rawText: string): ReceiptExpense {
   const start = rawText.indexOf('{');

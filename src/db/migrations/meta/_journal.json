@@ -29,6 +29,13 @@
       "when": 1789191765001,
       "tag": "0003_holding_coingecko_id",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789195019801,
+      "tag": "0004_indexes_and_chat_updates",
+      "breakpoints": true
     }
   ]
 }

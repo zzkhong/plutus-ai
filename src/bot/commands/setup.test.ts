@@ -167,3 +167,49 @@ test('handleSetupTextMessage on a key rotation (already approved) re-approves di
     global.fetch = originalFetch;
   }
 });
+
+test('classifyKeyFailure blames the key only when Google says it is the key', async () => {
+  const { classifyKeyFailure } = await import('./setup');
+
+  assert.equal(classifyKeyFailure('[400 Bad Request] API key not valid. Please pass a valid API key.'), 'invalid');
+  assert.equal(classifyKeyFailure('[403 Forbidden] PERMISSION_DENIED'), 'invalid');
+  assert.equal(classifyKeyFailure('[429 Too Many Requests] Resource has been exhausted (e.g. check quota).'), 'rate_limited');
+  assert.equal(classifyKeyFailure('[404 Not Found] models/gemini-x is not found for API version v1beta'), 'unavailable');
+  assert.equal(classifyKeyFailure('Gemini call timed out after 10000ms'), 'unavailable');
+});
+
+test('handleSetupTextMessage says whether Google rejected the key or only rate-limited it', async () => {
+  const { createUser, setProvider, findByChatId } = await import('../../users/service');
+  const { handleSetupTextMessage } = await import('./setup');
+  const created = await createUser('chat-key-failures');
+  await setProvider(created.id, 'gemini');
+  const user = (await findByChatId('chat-key-failures'))!;
+  const googleError = (status: number, statusText: string, message: string) =>
+    (async () =>
+      new Response(JSON.stringify({ error: { code: status, message } }), {
+        status,
+        statusText,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
+
+  const originalFetch = global.fetch;
+  try {
+    global.fetch = googleError(400, 'Bad Request', 'API key not valid. Please pass a valid API key.');
+    assert.match((await handleSetupTextMessage(user, 'bad-key')).reply, /Google rejected it/);
+
+    global.fetch = googleError(429, 'Too Many Requests', 'Resource has been exhausted (e.g. check quota).');
+    assert.match((await handleSetupTextMessage(user, 'busy-key')).reply, /over its rate limit/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('asking for the key explains that messages are read with Gemini', async () => {
+  const { createUser } = await import('../../users/service');
+  const { handleSetupTextMessage } = await import('./setup');
+  const user = await createUser('chat-key-privacy');
+
+  const { reply } = await handleSetupTextMessage(user, 'gemini');
+
+  assert.match(reply, /free tier, Google may use what's sent to improve its products/);
+});

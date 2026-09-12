@@ -342,3 +342,54 @@ test('logRecurringIfDue treats a day the month lacks as due on its last day', as
   assert.equal(await logRecurringIfDue(owner.id, charge.id, new Date(2025, 8, 29, 9)), null);
   assert.equal((await logRecurringIfDue(owner.id, charge.id, new Date(2025, 8, 30, 9)))?.merchant, 'Rent 31st');
 });
+
+test('currency markers count only as whole words, and a bare "$" is left to the card or SGD', async () => {
+  const { detectCurrencyFromText, parseExplicitCurrency, resolveCurrency } = await import('./currency-resolver');
+
+  for (const merchant of ['Guardian Pharmacy', 'FairPrice Supermarket', 'Farmers Market', 'Uniform Shop', 'Harmony Cafe']) {
+    assert.equal(resolveCurrency({ merchant }), 'SGD', merchant);
+  }
+  assert.equal(detectCurrencyFromText('RM45 at Kopitiam'), 'MYR');
+  assert.equal(detectCurrencyFromText('rm 12'), 'MYR');
+  assert.equal(detectCurrencyFromText('MYR 12'), 'MYR');
+  assert.equal(detectCurrencyFromText('S$20 lunch'), 'SGD');
+  assert.equal(detectCurrencyFromText('US$10 app'), 'USD');
+  assert.equal(detectCurrencyFromText('USD 10'), 'USD');
+  assert.equal(detectCurrencyFromText('$20 lunch'), undefined);
+  assert.equal(parseExplicitCurrency('$4.50'), undefined, 'a Singapore iPhone writes S$4.50 as $4.50');
+  assert.equal(parseExplicitCurrency('RM45.00'), 'MYR');
+  assert.equal(parseExplicitCurrency('US$10.00'), 'USD');
+  assert.equal(resolveCurrency({ cardName: 'Crypto.com Visa Card', merchant: 'Ya Kun' }), 'SGD');
+});
+
+test('fireRecurringForToday catches up a charge a skipped run missed, dated the day it fell due', async () => {
+  const { createUser } = await import('../users/service');
+  const { createRecurring, fireRecurringForToday } = await import('./index');
+  const { db, recurring_transactions } = await import('../db');
+  const { eq } = await import('drizzle-orm');
+  const { toIsoDate } = await import('../utils/dates');
+  const owner = await createUser('test-expense-recurring-catch-up-chat');
+  const yesterday = new Date(Date.now() - 86_400_000);
+
+  const missed = await createRecurring(owner.id, {
+    amount: 12,
+    merchant: 'Missed Gym',
+    category: 'Health',
+    day_of_month: yesterday.getDate(),
+  });
+  await createRecurring(owner.id, { amount: 7, merchant: 'Added Today', category: 'Bills', day_of_month: yesterday.getDate() });
+  // The first has stood for a week; the second was only just added, so its first charge is next month's.
+  await db
+    .update(recurring_transactions)
+    .set({ updated_at: Date.now() - 7 * 86_400_000 })
+    .where(eq(recurring_transactions.id, missed.id));
+
+  const caughtUp = await fireRecurringForToday(owner.id);
+
+  assert.deepEqual(
+    caughtUp.map((t) => t.merchant),
+    ['Missed Gym'],
+  );
+  assert.equal(toIsoDate(caughtUp[0].spent_at), toIsoDate(yesterday));
+  assert.equal((await fireRecurringForToday(owner.id)).length, 0, 'only once');
+});

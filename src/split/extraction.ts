@@ -18,9 +18,9 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-const SYSTEM_INSTRUCTION = `You are a receipt parser for Pluto AI's bill-splitting feature. You will receive a photo of a restaurant/food receipt. Extract every purchased line item (not tax, not service charge, not tip, not the total) with its price, plus the merchant name if visible, the currency, the sum of any tax/service charge/tip lines, and the final total. Return strict JSON only, matching exactly this shape:
+const SYSTEM_INSTRUCTION = `You are a receipt parser for Plutus AI's bill-splitting feature. You will receive a photo of a restaurant/food receipt. Extract every purchased line item (not tax, not service charge, not tip, not the total) with its price, plus the merchant name if visible, the currency, the sum of any tax/service charge/tip lines, and the final total. Return strict JSON only, matching exactly this shape:
 {"merchant": string | null, "items": [{"name": string, "price": number}], "taxAndTip": number, "total": number, "currency": "SGD" | "MYR" | "USD"}
-Prices are plain decimal numbers, no currency symbols. If you cannot read the receipt clearly, return {"merchant": null, "items": [], "taxAndTip": 0, "total": 0, "currency": "SGD"}.`;
+Prices are plain decimal numbers, no currency symbols. A plain "$" on a Singapore receipt is SGD, not USD. If you cannot read the receipt clearly, return {"merchant": null, "items": [], "taxAndTip": 0, "total": 0, "currency": "SGD"}.`;
 
 export function parseGeminiReceiptResponse(rawText: string): ExtractedReceipt {
   const start = rawText.indexOf('{');

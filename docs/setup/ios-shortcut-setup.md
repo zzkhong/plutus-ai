@@ -1,7 +1,7 @@
 # iOS Shortcut Setup — Apple Pay Webhook
 
 This sets up an iOS Shortcuts automation that fires every time you pay with
-Apple Pay, sends the transaction to Pluto AI's webhook, and logs it
+Apple Pay, sends the transaction to Plutus AI's webhook, and logs it
 automatically — no manual entry.
 
 ## 1. Get your webhook key
@@ -68,16 +68,19 @@ Add these actions, in order:
      - `x-api-key`: the key `/webhookkey` gave you
    - Request Body: **JSON**, with fields:
      - `amount`: the transaction amount (from the Apple Pay automation's
-       "Transaction Amount" magic variable)
+       "Transaction Amount" magic variable), sent as shown, e.g. `$4.50`. A
+       plain `$` is taken as the card's currency, or SGD, since a Singapore
+       iPhone writes S$4.50 that way; `RM` and `US$` are read as ringgit and
+       US dollars.
      - `merchant`: the transaction merchant (from "Transaction Merchant")
      - `card`: the card used (from "Transaction Card" — this determines the
        currency via the card→currency mapping in
        [src/config/currencies.ts](../../src/config/currencies.ts))
 3. **If** (Get Contents of URL fails / errors)
-   - **Show Notification**: "Pluto: Failed to log. Tell bot manually."
+   - **Show Notification**: "Plutus: Failed to log. Tell bot manually."
 
 Save the automation. Make a small Apple Pay purchase to test — you should
-get a Telegram message like `Spent $4.50 at Ya Kun — Food` within a few
+get a Telegram message like `Spent S$4.50 at Ya Kun — Food` within a few
 seconds.
 
 ## Troubleshooting

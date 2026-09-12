@@ -8,7 +8,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { and, desc, eq, gt, gte, lt, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm';
 
 import { SUPPORTED_CURRENCIES, toSGD } from '../config';
 import type { ExchangeRates } from '../config/currencies';
@@ -16,8 +16,8 @@ import { getExchangeRates } from '../fx/rates';
 import { db } from '../db';
 import { transactions, recurring_transactions } from '../db/schema';
 import { Category, Currency, Transaction, RecurringTransaction } from '../types';
-import { parseIsoDate } from '../utils/dates';
-import { inferCategory, matchCategory } from './categorizer';
+import { isSameDay, parseIsoDate, startOfDay, toIsoDate } from '../utils/dates';
+import { inferCategory, isMultiPurposeMerchant, matchCategory } from './categorizer';
 import { resolveCurrency } from './currency-resolver';
 import {
   Comparison,
@@ -89,11 +89,12 @@ function mapTransactionRow(row: typeof transactions.$inferSelect): Transaction {
 /**
  * The category this user last gave the same merchant (case-insensitively),
  * corrections included — a correction bumps updated_at. Null for a merchant
- * they've never logged.
+ * they've never logged, and for a multi-purpose one like Grab, where the
+ * message says more than the history does.
  */
 export async function rememberedCategory(userId: string, merchant: string): Promise<Category | null> {
   const key = merchant.trim().toLowerCase();
-  if (!key || key === UNKNOWN_MERCHANT.toLowerCase()) {
+  if (!key || key === UNKNOWN_MERCHANT.toLowerCase() || isMultiPurposeMerchant(merchant)) {
     return null;
   }
 
@@ -554,52 +555,65 @@ export async function listRecurring(userId: string): Promise<RecurringTransactio
   return rows.map(mapRecurringRow);
 }
 
+/** How far back the recurring job looks: today, and two days a skipped run may have missed. */
+const RECURRING_LOOKBACK_DAYS = 3;
+
 /**
- * Logs every recurring charge due today. `at` is injectable for tests.
+ * Logs each recurring charge that falls due today, and any a skipped run
+ * should have logged on the two days before — a scheduled cron call can be
+ * missed. A caught-up charge is dated the day it fell due. `at` is
+ * injectable for tests.
  *
  * A template's day may not exist this month — the 31st in September, the
- * 30th in February. Those fire on the month's last day rather than being
- * skipped, which is what happened before: a charge on the 31st went missing
- * five months a year.
+ * 30th in February. Those fall on the month's last day (isDueOn) rather than
+ * being skipped, which is what happened before: a charge on the 31st went
+ * missing five months a year.
+ *
+ * Safe to run any number of times: a charge is logged once per due day,
+ * keyed by its template's recurring_id and the day it was spent. A missed
+ * day is caught up only if the template already stood, unchanged, that day —
+ * one added or moved since starts from its next due day.
  */
 export async function fireRecurringForToday(userId: string, at: Date = new Date()): Promise<Transaction[]> {
-  const today = at.getDate();
-  const lastDayOfMonth = new Date(at.getFullYear(), at.getMonth() + 1, 0).getDate();
-  const dueRows = await db
+  const templates = await db
     .select()
     .from(recurring_transactions)
-    .where(
-      and(
-        eq(recurring_transactions.user_id, userId),
-        eq(recurring_transactions.is_active, 1),
-        or(
-          eq(recurring_transactions.day_of_month, today),
-          today === lastDayOfMonth ? gt(recurring_transactions.day_of_month, lastDayOfMonth) : undefined,
-        ),
-      ),
-    );
+    .where(and(eq(recurring_transactions.user_id, userId), eq(recurring_transactions.is_active, 1)));
+  if (templates.length === 0) {
+    return [];
+  }
 
-  // Charges this job has already logged today, by recurring template. Makes
-  // the job safe to run more than once a day: the standalone process runs it
-  // at startup and again at midnight, and a scheduled cron call can arrive
-  // twice.
-  const firedToday = await db
-    .select({ recurring_id: transactions.recurring_id })
+  // Noon on today and each day before it, so a caught-up charge lands on its day.
+  const days = Array.from(
+    { length: RECURRING_LOOKBACK_DAYS },
+    (_, back) => new Date(at.getFullYear(), at.getMonth(), at.getDate() - back, 12),
+  );
+  const logged = await db
+    .select({ recurring_id: transactions.recurring_id, spent: spentAtColumn })
     .from(transactions)
     .where(
       and(
         eq(transactions.user_id, userId),
         eq(transactions.source, 'recurring'),
-        gte(transactions.created_at, startOfPeriod('today', at)),
+        gte(spentAtColumn, startOfDay(days[days.length - 1]).getTime()),
       ),
     );
-  const alreadyFired = new Set(firedToday.map((row) => row.recurring_id));
+  const loggedDays = new Set(logged.map((row) => `${row.recurring_id}:${toIsoDate(new Date(row.spent))}`));
 
   const rates = await getExchangeRates();
   const created: Transaction[] = [];
-  for (const recurring of dueRows) {
-    if (!alreadyFired.has(recurring.id)) {
-      created.push(await insertRecurringCharge(userId, recurring, rates));
+  for (const template of templates) {
+    for (const [back, day] of days.entries()) {
+      const key = `${template.id}:${toIsoDate(day)}`;
+      if (!isDueOn(template.day_of_month, day) || loggedDays.has(key)) {
+        continue;
+      }
+      if (back > 0 && startOfDay(day).getTime() < startOfDay(new Date(template.updated_at)).getTime()) {
+        continue;
+      }
+      // Today's charge is spent now; one caught up for an earlier day, on that day.
+      created.push(await insertRecurringCharge(userId, template, rates, isSameDay(day, new Date()) ? undefined : day));
+      loggedDays.add(key);
     }
   }
 
@@ -611,6 +625,7 @@ async function insertRecurringCharge(
   userId: string,
   recurring: typeof recurring_transactions.$inferSelect,
   rates: ExchangeRates,
+  spentAt?: Date,
 ): Promise<Transaction> {
   const now = Date.now();
   const [inserted] = await db
@@ -627,7 +642,7 @@ async function insertRecurringCharge(
       card_name: 'Recurring',
       note: `Auto-logged recurring: ${recurring.merchant}`,
       recurring_id: recurring.id,
-      spent_at: now,
+      spent_at: spentAt?.getTime() ?? now,
       created_at: now,
       updated_at: now,
     })

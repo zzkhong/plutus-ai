@@ -18,7 +18,7 @@ const URL_SCHEME = /^(file|libsql|https?|wss?):/i;
 /**
  * DATABASE_URL accepts a libSQL URL — `libsql://…` for Turso, `file:…` for a
  * local SQLite file — or a bare path, which is treated as a local file so
- * existing values like `./data/pluto.db` keep working.
+ * existing values like `./data/plutus.db` keep working.
  */
 export function normalizeDatabaseUrl(value: string): string {
   if (URL_SCHEME.test(value)) {
@@ -48,7 +48,7 @@ const TELEGRAM_SECRET_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-    DATABASE_URL: z.string().default('file:./data/pluto.db').transform(normalizeDatabaseUrl),
+    DATABASE_URL: z.string().default('file:./data/plutus.db').transform(normalizeDatabaseUrl),
     DATABASE_AUTH_TOKEN: optional(z.string()),
     TELEGRAM_BOT_TOKEN: optional(z.string()),
     TELEGRAM_WEBHOOK_SECRET: optional(

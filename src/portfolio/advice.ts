@@ -81,7 +81,7 @@ export async function generatePortfolioAdvice(userId: string, summary: Portfolio
 
   const { text, grounded } = await provider.generateGroundedText({
     systemInstruction:
-      'You are Pluto AI, a personal finance assistant writing the portfolio section of a nightly digest. Reply in plain text only.',
+      'You are Plutus AI, a personal finance assistant writing the portfolio section of a nightly digest. Reply in plain text only.',
     contents: [{ text: buildAdvicePrompt(summary) }],
     timeoutMs: ADVICE_TIMEOUT_MS,
   });
