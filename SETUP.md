@@ -89,6 +89,11 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 > unreadable and everyone has to run `/setup` again. Store all three in a
 > password manager.
 
+Also get a free key from [exchangerate-api.com](https://www.exchangerate-api.com)
+for live SGD, MYR and USD exchange rates. The free plan allows 1,500 requests
+a month; the app caches rates for a day, so it uses about one a day. Without
+a key, conversions use fixed built-in rates.
+
 ### 2.3 Create the Vercel project
 
 1. In Vercel: **Add New → Project**, and import your `plutus-ai` GitHub repo.
@@ -107,6 +112,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | `ADMIN_CHAT_ID` | Your chat ID |
 | `TELEGRAM_WEBHOOK_SECRET` | From 2.2 |
 | `CRON_SECRET` | From 2.2 |
+| `EXCHANGE_RATE_API_KEY` | Your exchangerate-api.com key (see below) |
 | `APP_TIMEZONE` | Optional, defaults to `Asia/Singapore` |
 
 Leave Preview unticked. Builds for other branches then skip database
@@ -183,6 +189,7 @@ DATABASE_URL=file:./data/pluto.db
 TELEGRAM_BOT_TOKEN=<your DEVELOPMENT bot token>
 ADMIN_CHAT_ID=<your chat ID>
 APP_TIMEZONE=Asia/Singapore
+EXCHANGE_RATE_API_KEY=<your exchangerate-api.com key>
 ```
 
 Leave `TELEGRAM_WEBHOOK_SECRET`, `CRON_SECRET` and `DATABASE_AUTH_TOKEN` empty;
@@ -229,7 +236,30 @@ Until approved, a user can only use `/setup` and `/help`. Everyone's
 transactions, budgets and holdings are private to them. Rejecting someone
 deletes all of their data.
 
-## 5. Apple Pay auto-logging (optional)
+## 5. Importing your portfolio
+
+Send the bot a statement from your broker **as a file** — tap the paperclip
+and choose File, not Photo (photos go to `/split`). Any broker works, and so
+does any layout: a PDF statement, a screenshot of your positions screen, or a
+CSV export. The bot reads it with your own Gemini key and replies with what
+it imported:
+
+```
+Updated your IBKR holdings: 10 positions at the statement's prices from 10 Sep 2026.
+New net worth: S$77,088.32.
+```
+
+- **Stocks and ETFs are valued at the statement's prices**, not live quotes.
+  Send a newer statement from the same broker to update them; it replaces the
+  previous one's holdings completely, including positions you've since sold.
+- Positions priced in a currency other than SGD, MYR or USD, or listed outside
+  the US, SGX and Bursa, are skipped and named in the reply.
+- Add crypto and cash in chat: *"I hold 0.5 BTC"*, *"cash SGD 5000"*. Crypto
+  is priced live.
+- `/portfolio` shows each holding with its value in SGD and where the price
+  came from.
+
+## 6. Apple Pay auto-logging (optional)
 
 Each approved user has their own webhook key. Send **`/webhookkey`** to the
 bot to get yours, then follow
@@ -286,6 +316,8 @@ drop-and-recreate, which loses that column's data.
 
 - **Turso free:** 5 GB of storage, 500 million rows read and 10 million rows
   written per month. A personal bot uses a tiny fraction of that.
+- **exchangerate-api.com free:** 1,500 requests a month. Rates are cached
+  for a day in the database, so the app uses about 30.
 - **Vercel Hobby:** for personal, non-commercial use. Its scheduled jobs run
   once a day at some point within the scheduled hour, so the 22:00 digest
   arrives between 22:00 and 22:59.
@@ -342,6 +374,11 @@ The admin needs to `/approve <your chat_id>`.
 **"That key didn't work — the provider rejected it".**
 Check the key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 The free tier is rate-limited, so a heavily used key can fail validation.
+
+**"I couldn't read that statement".**
+The reply says why. Make sure you sent it as a file, not a photo. If a
+spreadsheet export fails, export it as PDF or CSV instead. Positions in an
+unsupported currency or market are skipped and listed rather than imported.
 
 **Local: `table budgets already exists` on startup.**
 `data/pluto.db` was created by an older version of the app. Delete it.

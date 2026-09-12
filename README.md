@@ -1,202 +1,190 @@
 # Plutus AI
 
-A personal finance assistant that lives in Telegram. It logs expenses, tracks
-budgets and a brokerage/crypto/cash portfolio, splits bills from a receipt
-photo, sends a nightly AI-written digest with a market take on your holdings,
-and can auto-log Apple Pay transactions from an iOS Shortcut.
+**A personal finance assistant that lives in Telegram.** Tell it what you
+spent, the way you'd text a friend, and it keeps your expenses and budgets in
+order. No app to open, no forms to fill in.
 
-It is **multi-user with bring-your-own-key**: each person registers through
-the bot with `/setup` and supplies their own Gemini API key, stored encrypted
-at rest. The first chat (`ADMIN_CHAT_ID`) bootstraps as admin and approves
-everyone else. All data — transactions, budgets, holdings — is scoped per
-user.
+```
+You:     Spent $4.50 at Ya Kun
+Plutus:  Logged S$4.50 at Ya Kun under Food.
 
-It runs **for free on Vercel + Turso**, or as one long-running Node process
-for local development. See [docs/architecture.md](docs/architecture.md) for
-diagrams.
+You:     Grab 18
+Plutus:  Logged S$18.00 at Grab under Transport.
 
-Message understanding is **Gemini-first with no rule-based fallback** — if
-Gemini can't classify a message, the bot says so rather than guessing with
-keyword matching. Every classified intent is wired to a real action, and
-voice notes are transcribed by Gemini and routed the same way typed text
-is — see [Free-text intents](#free-text-intents-what-actually-happens)
-below for the full list.
+         ⚠️ Transport budget alert: you've used 80% (S$161.00 / S$200.00) this month.
 
-## Features
+You:     How much have I spent on food this month?
+Plutus:  This month's spend on Food: S$212.40 across 23 transactions.
+         That's 42.5% of your S$500.00 budget, S$287.60 left.
+```
 
-- **Expense logging** — free-text or voice messages ("Spent $4.50 at Ya
-  Kun"), recurring charges, Apple Pay auto-logging via webhook, and the
-  `/today`/`/month`/`/undo` commands. Currency is resolved per message
-  (explicit currency > card mapping > merchant/note regex > SGD default) and
-  every amount is normalized to SGD cents for reporting. `/export` sends the
-  year's transactions as a CSV file.
-- **Budgets** — set a per-category monthly limit in chat ("Set food budget
-  to $500/month"); `/budget` shows spend-vs-limit with days left in the
-  month, and the bot pings you the first time you cross a threshold.
-- **Portfolio tracker** — `/portfolio` for net worth and allocation across
-  brokerage (upload an IBKR/Moomoo statement PDF), crypto, and cash (add
-  crypto, stock or cash holdings in chat, e.g. "I hold 0.5 BTC" or "I hold
-  10 AAPL shares"). Prices come from Yahoo Finance (US, SGX and Bursa
-  stocks) and CoinGecko (the major coins).
-- **Bill splitting** — `/split`, send a receipt photo, then say "split
-  evenly among 3" or "Alice had the burger, I had the salad" — the bot
-  extracts line items, computes each person's share (tax/tip applied
-  proportionally), and can log your own share as an expense.
-- **Daily digest** — an AI-written summary of the day's spending plus a
-  market take on your portfolio (what today's news means for your actual
-  holdings, and a hold/trim/rebalance lean), sent every night around 10pm
-  Singapore time (also available on demand via `/digest`).
-- **Corrections** — "actually that was $12 not $10" retroactively edits
-  your most recent transaction.
+Plutus is built for Singapore and Malaysia: it understands S$, RM and US$,
+hawker centres and Grab rides, and it keeps everything in SGD for you.
 
-### Free-text intents: what actually happens
+---
 
-Every message is classified by Gemini into an intent, and every intent is
-wired to a real action:
+## What it does
 
-| You say something like... | What happens |
+### Track every expense by just saying it
+
+- **Type it, however you'd say it.** *"Spent $4.50 at Ya Kun"*, *"Grab 12.80"*,
+  *"RM 45 at Kopitiam"*, *"lunch 8.50"*. Plutus works out the amount, the
+  merchant and the category.
+- **Or send a voice note.** Plutus transcribes it and handles it exactly like
+  a typed message. Its reply starts with `Heard: "…"`, so you can see what it
+  understood.
+- **Categories are automatic.** Every expense lands in one of Food, Transport,
+  Groceries, Entertainment, Bills, Health, Education, Travel, Shopping or
+  Others.
+- **Three currencies.** Spend in SGD, MYR or USD. Everything is also stored in
+  SGD at that day's exchange rate, so your totals and budgets always add up,
+  and the reply shows both: *"Logged RM45.00 (S$14.02) at Kopitiam under
+  Food."*
+- **Fix mistakes in plain words.** Your most recent expense can be corrected
+  by saying *"actually that was $12"*, *"it was in ringgit"* or *"that was
+  Transport"*. `/undo` removes it entirely.
+- **Recurring charges log themselves.** *"Netflix $15.98 every 5th"* logs that
+  charge on the 5th of every month. A charge on the 31st is logged on the
+  last day of shorter months. *"Cancel my Netflix"* stops it.
+- **Apple Pay, automatically** (optional). With an iOS Shortcut, every Apple
+  Pay purchase is logged the moment you tap your phone. See
+  [the Shortcut guide](docs/setup/ios-shortcut-setup.md).
+
+### Stay on budget
+
+- **Set a monthly budget per category**, in any of the three currencies:
+  *"Set food budget to $500"*, *"Transport budget RM 300"*. Say it again to
+  change the amount; *"remove my food budget"* deletes it.
+- **Alerts when it matters.** When an expense takes a category past **80%**,
+  and again past **100%**, of its budget, the alert comes with that expense's
+  reply. Each alert fires once a month, and budgets start fresh on the 1st.
+- **Check in any time.** `/budget` shows every budget at a glance:
+
+  ```
+  Budgets this month (18 days left):
+  Food: S$212.40 of S$500.00 (42.5%), S$287.60 left
+  Transport: S$214.00 of S$200.00 (107%), over by S$14.00
+  ```
+
+- **Ask about your spending.** *"How much did I spend today?"*, *"…in the last
+  week?"*, *"…on transport this month?"* — or use `/today` and `/month` for a
+  breakdown by category.
+
+### A nightly digest
+
+Around 10pm every night, Plutus sends a short summary of your day: what you
+spent and on what, recurring charges it logged, how your budgets are doing,
+and a take on your portfolio, with one line of advice written by AI. `/digest`
+shows it on demand.
+
+### And a few more things
+
+- **Split a bill** — `/split`, send a photo of the receipt, then say *"split
+  evenly between 3"* or *"Alice had the burger, I had the salad"*. Plutus
+  reads the items, works out each person's share (tax and service charge
+  included), and can log just your share as an expense.
+- **Track your portfolio** — send any broker's statement **as a file** (PDF,
+  screenshot or CSV) and your positions are imported at the statement's
+  prices. Add crypto and cash in chat (*"I hold 0.5 BTC"*, *"cash SGD
+  5000"*). `/portfolio` shows your net worth and where it sits.
+- **Export your data** — `/export` sends you this year's transactions as a CSV
+  file you can open in Excel or Google Sheets.
+
+---
+
+## Getting started
+
+Plutus runs as a Telegram bot. Someone runs an instance of it, and you
+register with that bot using your own free Google Gemini key, which is what
+lets Plutus understand your messages.
+
+1. **Get a Gemini API key.** It's free: go to
+   [aistudio.google.com/apikey](https://aistudio.google.com/apikey), sign in
+   and create a key.
+2. **Open the bot** in Telegram and send **`/setup`**.
+3. **Reply `gemini`** when it asks which provider to use.
+4. **Paste your key.** Plutus checks it works, then deletes your message so
+   the key doesn't stay in the chat. It's stored encrypted.
+5. **Wait for approval.** The bot's admin gets a message to approve you, and
+   you're told as soon as they do. (If you set up the bot yourself, you're the
+   admin and are approved straight away.)
+
+Then just start telling it what you spend. Send `/help` any time for the list
+of commands.
+
+**Want to run your own Plutus?** It runs free on Vercel and Turso;
+[SETUP.md](SETUP.md) walks you through it step by step.
+
+---
+
+## Commands
+
+| Command | What it does |
 |---|---|
-| "Spent $4.50 at Ya Kun" | **Real** — logs an expense (category inferred by Gemini) |
-| "How much did I spend on food?" | **Real** — pulls real spending data for the mentioned period (today/week/month) |
-| "Set food budget to $500/month" | **Real** — updates your budget |
-| "Actually that was $12 not $10" | **Real** — corrects your last transaction |
-| "I hold 0.5 BTC" | **Real** — adds/updates a portfolio holding |
-| "Netflix $15.98 every 5th" | **Real** — sets up a recurring monthly charge |
-| "Cancel my Spotify subscription" | **Real** — removes a recurring charge matched by merchant name |
-| A voice note saying any of the above | **Real** — Gemini transcribes it, then it's routed exactly like typed text (replies are prefixed `Heard: "..."` so you can see what was understood) |
+| `/today` | Today's spending by category |
+| `/month` | This month's spending by category |
+| `/budget` | How every budget is doing this month |
+| `/undo` | Remove your most recent expense |
+| `/export` | This year's transactions as a CSV file |
+| `/digest` | Show tonight's digest now |
+| `/split` | Split a bill from a receipt photo (`/cancel` stops it) |
+| `/portfolio` | Net worth, allocation and holdings |
+| `/webhookkey` | Your personal key for the Apple Pay Shortcut |
+| `/setup` | Register, or change your Gemini key |
+| `/help` | The command list |
 
-See [CLAUDE.md](CLAUDE.md#request-flow-telegram) for the code-level
-breakdown if you're picking up work here.
+You don't need commands for most things. Just say what you mean:
 
-## Requirements
+| You say… | Plutus… |
+|---|---|
+| "Spent $4.50 at Ya Kun" · "RM 45 at Kopitiam" · "Grab 12.80" | logs the expense and categorizes it |
+| "Actually that was $12" · "it was in ringgit" · "that was Transport" | corrects your last expense |
+| "How much did I spend this week?" · "…on food this month?" | tells you, with the budget if you have one |
+| "Set food budget to $500" · "Remove my travel budget" | sets or removes a monthly budget |
+| "Netflix $15.98 every 5th" · "Cancel my Spotify" | starts or stops a recurring charge |
+| "I hold 0.5 BTC" · "cash SGD 5000" | adds a crypto or cash holding |
+| a voice note saying any of the above | does the same |
 
-- Node.js 22+
-- Two [Telegram bot tokens](https://core.telegram.org/bots#how-do-i-create-a-bot)
-  — one for production, one for local development
-- A [Google Gemini API key](https://aistudio.google.com/apikey) per user —
-  pasted into the bot during `/setup`, **not** put in any config
-- For production: free [Vercel](https://vercel.com) (Hobby) and
-  [Turso](https://turso.tech) accounts
+---
 
-## Setup
+## Good to know
 
-**→ [SETUP.md](SETUP.md) is the full walkthrough.** In short:
+- **Corrections and `/undo` apply to your most recent expense.** To fix an
+  older one, undo back to it or correct it right after logging.
+- **"This week" means the last 7 days**, and the answer says so.
+- **Your data is yours alone.** Everyone registered with the same bot has
+  completely separate expenses, budgets and holdings. Your Gemini key is
+  stored encrypted and only used for your own messages.
+- **Plutus never guesses.** If it can't understand a message, it says so
+  rather than logging something wrong. The same goes for statements it can't
+  read and holdings it can't price.
+- **The Gemini free tier is rate-limited.** If replies start failing after
+  heavy use, it's usually the daily limit; they resume the next day.
+- **Statements must be sent as a file, not a photo.** Photos are reserved for
+  `/split` receipts.
 
-**Production** — create a Turso database in Tokyo, import the repo into
-Vercel, set the environment variables, deploy, then point Telegram at it:
+---
+
+## For developers
+
+Plutus is TypeScript on Node 22: a [grammy](https://grammy.dev) Telegram bot
+and a [Hono](https://hono.dev) app, with Drizzle ORM over libSQL (a SQLite
+file locally, [Turso](https://turso.tech) in production). Every message is
+understood by the user's own Gemini key, with no rule-based fallback. It runs
+on Vercel for free, or as one long-running process locally.
 
 ```bash
-npm run telegram:webhook -- set https://<your-project>.vercel.app
-```
-
-**Local development** — with a separate development bot:
-
-```bash
-git clone https://github.com/zzkhong/plutus-ai.git
-cd plutus-ai
 npm install
-cp .env.example .env   # set ENCRYPTION_KEY, your dev TELEGRAM_BOT_TOKEN and ADMIN_CHAT_ID
-npm run dev
+npm run dev        # run locally against a SQLite file, with a development bot
+npm test           # the full test suite, no network needed
+npm run typecheck
+npm run lint
 ```
 
-Then message the bot `/setup`, reply `gemini`, and paste your Gemini API key.
-As `ADMIN_CHAT_ID` you are approved automatically.
-
-## Running
-
-| | Local / self-hosted | Vercel |
-|---|---|---|
-| Entrypoint | `src/standalone.ts` | `src/app.ts` |
-| Telegram | long polling | webhook, `POST /api/telegram` |
-| Daily jobs | node-cron | Vercel Cron → `/api/cron/*` |
-| Database | SQLite file (`file:./data/pluto.db`) | Turso (`libsql://…`) |
-| Migrations | on startup | during `npm run vercel-build` |
-
-```bash
-npm run dev      # standalone process with hot reload (tsx)
-npm run build    # compile to dist/ and copy migrations
-npm run start    # run the compiled standalone process
-```
-
-### Try it
-
-In your Telegram chat with the bot:
-
-```
-/help
-Set food budget to $500/month
-/budget
-I hold 0.5 BTC
-/portfolio
-Spent $4.50 at Ya Kun
-/today
-/split
-```
-
-### Testing expense logging directly
-
-Without Telegram, the most direct way to exercise `logExpense` end-to-end
-is the Apple Pay webhook. Get your personal key from the bot with
-`/webhookkey`:
-
-```bash
-curl -X POST https://<your-project>.vercel.app/api/apple-pay \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: <your /webhookkey value>" \
-  -d '{"amount": "12.50", "merchant": "McDonalds", "card": "DBS"}'
-```
-
-Locally, use `http://localhost:3000/api/apple-pay`. This logs a real
-transaction against your account (category inferred by Gemini) — `/today`
-will then show it, and you get a Telegram confirmation.
-
-### iOS Shortcuts (Apple Pay auto-logging)
-
-Optional. See [docs/setup/ios-shortcut-setup.md](docs/setup/ios-shortcut-setup.md)
-for wiring up a Shortcuts automation so Apple Pay purchases log themselves.
-
-## Automated tests
-
-```bash
-npm test           # runs the full fixed test list via node's test runner
-npm run typecheck  # tsc --noEmit over src, tests included
-npm run lint       # eslint
-```
-
-Run a single file or filter by name:
-
-```bash
-npx tsx --test src/expense/expense.test.ts
-npx tsx --test --test-name-pattern="undoLastTransaction" src/expense/expense.test.ts
-```
-
-No test hits the network by default — every Gemini call is stubbed, and each
-test file uses its own SQLite file in `./data/`. `npm test` runs a **fixed
-list** of test files wired into `package.json`'s `test` script, not a glob —
-a new `*.test.ts` file must be added there explicitly or it won't run. See
-[CLAUDE.md](CLAUDE.md#commands) for the conventions to follow.
-
-## Troubleshooting
-
-- **The production bot doesn't reply** — run `npm run telegram:webhook -- info`
-  with the production token and read `last_error_message`. See
-  [SETUP.md](SETUP.md#troubleshooting).
-- **Local `npm run dev` refuses to start polling** — you're using the
-  production bot's token, which is claimed by its webhook. Use a separate
-  development bot.
-- **Startup throws `Invalid environment configuration`** — the log names the
-  field; usually `ENCRYPTION_KEY` (64 hex characters), `ADMIN_CHAT_ID`
-  (required with `TELEGRAM_BOT_TOKEN`), or `DATABASE_AUTH_TOKEN` (required for
-  a Turso URL).
-- **Gemini classification errors** — the model id is pinned in
-  [src/llm/gemini.ts](src/llm/gemini.ts); if it starts failing outright,
-  check `GET /v1beta/models` against your key for deprecation.
-
-## Project layout
-
-See [docs/architecture.md](docs/architecture.md) for diagrams,
-[CLAUDE.md](CLAUDE.md) for architecture notes, and [docs/tasks/](docs/tasks/)
-for the build plan this project was implemented against.
+- [SETUP.md](SETUP.md) — deploy your own, and local development
+- [docs/architecture.md](docs/architecture.md) — diagrams and design decisions
+- [CLAUDE.md](CLAUDE.md) — detailed notes on how the code fits together
+- [docs/tasks/](docs/tasks/) — the plan the modules were built against
 
 ## License
 

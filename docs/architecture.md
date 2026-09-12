@@ -40,7 +40,8 @@ flowchart LR
 
     turso[("Turso libSQL<br/>aws-ap-northeast-1 (Tokyo)")]
     gemini["Google Gemini API<br/>each user's own key"]
-    prices["Yahoo Finance and CoinGecko"]
+    prices["CoinGecko<br/>crypto prices"]
+    fxapi["exchangerate-api.com<br/>SGD rates"]
 
     tg -- "text, voice, photos, PDFs" --> tgapi
     tgapi -- "webhook + secret header" --> rtg
@@ -48,7 +49,8 @@ flowchart LR
     app -- "replies and file downloads" --> tgapi
     app -- "SQL over HTTPS" --> turso
     app -- "classify, categorize, transcribe, advise" --> gemini
-    app -- "price quotes" --> prices
+    app -- "crypto prices" --> prices
+    app -- "exchange rates, cached a day" --> fxapi
 ```
 
 Vercel and Turso sit in the same region (Tokyo). Turso has no Singapore
@@ -107,7 +109,7 @@ sequenceDiagram
     participant C as Vercel Cron
     participant F as Vercel Function
     participant DB as Turso
-    participant P as Yahoo / CoinGecko
+    participant P as CoinGecko
     participant G as Gemini (each user's key)
     participant T as Telegram Bot API
 
@@ -115,7 +117,7 @@ sequenceDiagram
     F->>DB: listApproved()
     loop Each approved user, failures isolated per user
         F->>DB: Today's spending, budgets, recurring charges, holdings
-        F->>P: Current prices
+        F->>P: Crypto prices (stocks use their statement price)
         F->>G: Summary line and grounded portfolio market take
         F->>T: sendMessage(that user's chat)
     end
@@ -155,6 +157,7 @@ flowchart TB
 
     llm["src/llm<br/>provider.ts to gemini.ts"]
     db["src/db<br/>Drizzle + libSQL"]
+    fxmod["src/fx<br/>exchange rates"]
 
     appts --> http
     stand --> http
@@ -167,6 +170,7 @@ flowchart TB
     botmod --> domain
     domain --> llm
     domain --> db
+    domain --> fxmod
     llm --> usr
 ```
 
@@ -206,6 +210,20 @@ erDiagram
         text state "JSON, expires after 2 hours idle"
         integer updated_at
     }
+    holdings {
+        text id PK
+        text user_id FK
+        text symbol
+        real quantity
+        text broker "normalized, e.g. ibkr; null if entered in chat"
+        real price "per unit, from the statement"
+        integer price_as_of "the statement date"
+    }
+    fx_rates {
+        text id PK "SGD"
+        text rates "JSON, units per 1 SGD"
+        integer fetched_at
+    }
 ```
 
 `split_sessions` is keyed by Telegram chat rather than by user. `reject()`
@@ -240,3 +258,10 @@ clears it along with the user's other rows.
   unreviewed schema change to production data.
 - **`/export` is sent as a file.** The CSV is built in memory and sent as a
   Telegram document. Nothing is written to disk, which is read-only on Vercel.
+- **Stocks are valued at statement prices, not live quotes.** A statement
+  from any broker, in any layout, is read by the user's own model into
+  positions with a unit price and a date, and the next statement from the same
+  broker replaces them. Only crypto is priced live.
+- **Exchange rates are cached for a day in the database**, not only in
+  memory. On Vercel a memory-only cache would call the API on almost every
+  cold start, and the free plan allows 1,500 requests a month.
