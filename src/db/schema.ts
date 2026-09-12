@@ -44,10 +44,35 @@ export const transactions = sqliteTable('transactions', {
   // The recurring template that logged this row, if any — the recurring
   // job's idempotency key, so running it twice in a day can't double-log.
   recurring_id: text('recurring_id'),
+  // When the money was spent: "yesterday" or a receipt's date, else the time
+  // it was logged. Totals and budgets go by this; "latest" (undo, /recent,
+  // corrections) goes by created_at. Nullable only because SQLite can't add a
+  // NOT NULL column without a constant default — every write sets it, and
+  // migration 0002 backfilled existing rows from created_at.
+  spent_at: integer('spent_at'),
   created_at: integer('created_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
   updated_at: integer('updated_at')
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+});
+
+// Money coming in (salary, freelance, refunds), for /month's savings rate and
+// the month-end review. Kept apart from transactions so an income can never
+// be counted as spending.
+export const income = sqliteTable('income', {
+  id: text('id').primaryKey(),
+  user_id: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  amount: integer('amount').notNull(), // in cents
+  currency: text('currency').notNull(),
+  amount_sgd: integer('amount_sgd').notNull(), // normalized to SGD in cents
+  source: text('source').notNull(), // what it was, e.g. "Salary"
+  note: text('note'),
+  received_at: integer('received_at').notNull(),
+  created_at: integer('created_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
 });
@@ -85,11 +110,11 @@ export const budgets = sqliteTable('budgets', {
   user_id: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  category: text('category').notNull(),
+  category: text('category').notNull(), // a Category, or 'Overall' for all spending
   amount: integer('amount').notNull(), // in cents
   currency: text('currency').notNull(),
   amount_sgd: integer('amount_sgd').notNull(), // normalized to SGD in cents
-  period: text('period').notNull(), // daily, weekly, monthly, yearly
+  period: text('period').notNull(), // always 'monthly' — budgets reset on the 1st
   created_at: integer('created_at')
     .notNull()
     .default(sql`(unixepoch() * 1000)`),
@@ -107,7 +132,7 @@ export const budget_alerts = sqliteTable('budget_alerts', {
   budget_id: text('budget_id')
     .notNull()
     .references(() => budgets.id, { onDelete: 'cascade' }),
-  threshold: integer('threshold').notNull(), // 80 or 100
+  threshold: integer('threshold').notNull(), // 80 or 100, or 0 for the pace warning
   month: text('month').notNull(), // 'YYYY-MM'
   sent_at: integer('sent_at')
     .notNull()

@@ -48,9 +48,11 @@ async function main(): Promise<void> {
       if (!url.startsWith('https://')) {
         fail(`Telegram only delivers webhooks over HTTPS, got ${url}`);
       }
-      // Messages are the only update type the bot handles; commands, voice
-      // notes, photos and PDFs all arrive as messages.
-      await api.setWebhook(url, { secret_token: secret, allowed_updates: ['message'] });
+      // Commands, text, voice notes, photos and files arrive as messages;
+      // presses on the Change category / Undo buttons as callback queries.
+      // Telegram never delivers a type left out here, so a webhook set
+      // before the buttons existed has to be set again.
+      await api.setWebhook(url, { secret_token: secret, allowed_updates: ['message', 'callback_query'] });
       console.log(`Webhook set: ${url}`);
       console.log('Send /help to the bot to check it responds.');
       break;

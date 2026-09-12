@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
   formatBudgetStatus,
   formatCategorySpend,
+  formatExpenseLine,
   formatMoneyWithSgd,
+  formatSavings,
   formatSpendingSummary,
 } from './messages';
 
@@ -80,5 +82,46 @@ test('formatCategorySpend answers for one category, adding its budget when there
   assert.equal(
     formatCategorySpend("This month's spend", 'Food', 20000, 5, status()),
     "This month's spend on Food: S$200.00 across 5 transactions.\nThat's 40% of your S$500.00 budget, S$300.00 left.",
+  );
+});
+
+test('formatBudgetStatus adds where the month is heading, while under a budget it will overshoot', () => {
+  const reply = formatBudgetStatus([
+    status({ projected_sgd: 62000 }),
+    status({ category: 'Transport', projected_sgd: 9000 }),
+    status({ category: 'Bills', budget_sgd: 10000, spent_sgd: 12000, percentage: 120, remaining_sgd: -2000, projected_sgd: 30000 }),
+  ]);
+
+  const [, food, transport, bills] = reply.split('\n');
+  assert.equal(food, 'Food: S$200.00 of S$500.00 (40%), S$300.00 left, on pace for S$620.00');
+  assert.doesNotMatch(transport, /on pace/, 'on track');
+  assert.equal(bills, 'Bills: S$120.00 of S$100.00 (120%), over by S$20.00', 'already over');
+});
+
+test('formatSavings shows the savings rate, or how far spending went past income', () => {
+  assert.equal(formatSavings(0, 1000), null);
+  assert.equal(formatSavings(500000, 123400), 'Income: S$5000.00 · saved S$3766.00 (75.3%).');
+  assert.equal(formatSavings(100000, 150000), 'Income: S$1000.00 · spent S$500.00 more than that.');
+});
+
+test('formatExpenseLine names the day only when it was not today', () => {
+  const now = new Date(2026, 5, 20, 15);
+  const expense = {
+    id: 'x',
+    amount: 450,
+    currency: 'SGD' as const,
+    amount_sgd: 450,
+    merchant: 'Ya Kun',
+    category: 'Food' as const,
+    source: 'text',
+    card_name: 'General',
+    spent_at: new Date(2026, 5, 20, 8),
+    created_at: now,
+  };
+
+  assert.equal(formatExpenseLine(expense, now), 'S$4.50 at Ya Kun under Food');
+  assert.equal(
+    formatExpenseLine({ ...expense, spent_at: new Date(2026, 5, 18, 12) }, now),
+    'S$4.50 at Ya Kun under Food, on 18 Jun 2026',
   );
 });

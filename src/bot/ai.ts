@@ -5,15 +5,18 @@
 import { getProviderForUser } from '../llm/provider';
 import { findById } from '../users/service';
 import { logger } from '../utils/logger';
+import { earlierDay, formatDay, isFutureDay, parseIsoDate, toIsoDate } from '../utils/dates';
 import {
   formatCategorySpend,
+  formatExpenseLine,
   formatHelpMessage,
   formatMoneyWithSgd,
   formatSpendingSummary,
   formatUserFriendlyError,
 } from './formatter/messages';
-import { BotIntent } from './types';
-import { Currency, Transaction } from '../types';
+import { incomeActions, transactionActions } from './keyboards';
+import { BotIntent, BotReply } from './types';
+import { Currency, OVERALL_BUDGET, Transaction } from '../types';
 import { isPricedCrypto } from '../portfolio/price-fetcher/crypto';
 import { ExpenseSource, SpendingPeriod } from '../expense/types';
 
@@ -58,6 +61,10 @@ function resolveHoldingCurrency(symbol: string, assetClass: 'crypto' | 'cash', c
 const VALID_CURRENCIES = new Set(['SGD', 'MYR', 'USD']);
 const VALID_SPENDING_PERIODS = new Set(['today', 'week', 'month']);
 
+function currencyFrom(raw: string | undefined): Currency | undefined {
+  return raw && VALID_CURRENCIES.has(raw) ? (raw as Currency) : undefined;
+}
+
 export interface ExtractedFields {
   amount?: number;
   merchant?: string;
@@ -69,6 +76,8 @@ export interface ExtractedFields {
   assetClass?: string;
   currency?: string;
   dayOfMonth?: number;
+  /** "YYYY-MM-DD", when the message puts an expense, income or correction on another day. */
+  date?: string;
 }
 
 export interface IntentAnalysis {
@@ -81,10 +90,10 @@ export interface IntentAnalysis {
 }
 
 /**
- * Returned when Gemini itself fails (timeout, network error, unparseable response).
- * There is deliberately no rule-based classification here — Pluto AI is Gemini-first,
- * see doc/tasks/02-telegram-bot.md. A failure is surfaced as "unknown" with serviceError
- * set, not silently guessed via keyword matching.
+ * Returned when Gemini itself fails (timeout, network error, unparseable
+ * response). There is deliberately no rule-based classification here —
+ * Plutus is Gemini-first. A failure is surfaced as "unknown" with
+ * serviceError set, not silently guessed via keyword matching.
  */
 function gracefulUnknown(rawText: string): IntentAnalysis {
   return {
@@ -109,7 +118,22 @@ function safeJsonParse(text: string): Partial<IntentAnalysis> | null {
   }
 }
 
-export async function classifyUserMessage(userId: string, rawText: string): Promise<IntentAnalysis> {
+const CLASSIFIER_INSTRUCTION = [
+  'You are Plutus AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only, with fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action, symbol, assetClass, currency, dayOfMonth, date }, rawText.',
+  'Allowed intents: expense, income, query, budget, correction, recurring, holdings, help, unknown.',
+  'The expense intent covers money spent, like "Spent $4.50 at Ya Kun" or "Grab 18 yesterday" — extract amount, merchant, currency, and category as the best category for it.',
+  'The income intent covers money coming in, like "Salary $5200 came in", "got paid RM 4000" or "freelance job $800" — extract amount, currency, and merchant as what the income was (Salary, Freelance, Bonus and so on).',
+  'For expense, income and correction, extract date as YYYY-MM-DD when the user says it happened on a day other than today ("yesterday", "last Friday", "on the 3rd"), working it out from the date given with the message; leave date out otherwise.',
+  'The holdings intent covers portfolio holdings mentioned in chat, like "I hold 0.5 BTC", "cash SGD 5000" or "I have 10 AAPL shares" — extract symbol (the coin, currency or ticker symbol, never a company name), assetClass (crypto, cash, or stocks_us, stocks_sg or stocks_my when it is a stock or ETF), currency, and amount as the quantity; set action="remove" when the user wants a holding removed.',
+  'The recurring intent covers repeating charges like "Netflix $15.98 every 5th" or "cancel my Spotify subscription" — extract merchant, amount, and dayOfMonth (1-31, the day of the month it recurs on) for a new one, or action="remove" and merchant for cancelling an existing one.',
+  'The query intent covers spending questions like "how much did I spend this week" or "how much on food this month" — extract period as one of today, week, or month, and category when the question is about one category.',
+  'The budget intent sets or removes a monthly budget, like "Set food budget to $500" or "remove my travel budget" — extract category, budgetAmount and currency, and action="remove" for a removal. For a budget on all spending ("monthly budget $3000", "overall budget", "total budget"), set category to Overall.',
+  'The correction intent covers fixing a logged expense, like "actually that was $12", "it was in ringgit", "that was Transport" or "that was yesterday" — extract whichever of amount, currency, merchant, category and date the user is changing.',
+  'A category is one of Food, Transport, Groceries, Entertainment, Bills, Health, Education, Travel, Shopping or Others; a currency is SGD, MYR (ringgit, RM) or USD. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
+].join(' ');
+
+/** `now` is injectable for tests; the classifier needs today's date to resolve "yesterday". */
+export async function classifyUserMessage(userId: string, rawText: string, now: Date = new Date()): Promise<IntentAnalysis> {
   const trimmed = rawText.trim();
 
   if (!trimmed) {
@@ -128,14 +152,14 @@ export async function classifyUserMessage(userId: string, rawText: string): Prom
     }
     const provider = getProviderForUser(user);
 
-    const prompt = `User message: "${trimmed}"\n\nReturn only valid JSON with keys intent, confidence, extracted, rawText.`;
+    const today = `${now.toLocaleDateString('en-SG', { weekday: 'long' })} ${toIsoDate(now)}`;
+    const prompt = `Today is ${today}.\nUser message: "${trimmed}"\n\nReturn only valid JSON with keys intent, confidence, extracted, rawText.`;
 
     // gemini-3.6-flash's reasoning overhead routinely takes ~5s for this
     // prompt, so the timeout needs enough headroom to not misfire as a
     // service error.
     const response = await provider.generateText({
-      systemInstruction:
-        'You are Pluto AI, a personal finance assistant in Telegram. Classify each user message and return strict JSON only. Return fields: intent, confidence, extracted { amount, merchant, category, period, budgetAmount, action, symbol, assetClass, currency, dayOfMonth }, rawText. Allowed intents: expense, query, budget, correction, recurring, holdings, help, unknown. The holdings intent covers portfolio holdings mentioned in chat, like "I hold 0.5 BTC", "cash SGD 5000" or "I have 10 AAPL shares" — extract symbol (the coin, currency or ticker symbol, never a company name), assetClass (crypto, cash, or stocks_us, stocks_sg or stocks_my when it is a stock or ETF), currency, and amount as the quantity; set action="remove" when the user wants a holding removed. The recurring intent covers repeating charges like "Netflix $15.98 every 5th" or "cancel my Spotify subscription" — extract merchant, amount, and dayOfMonth (1-31, the day of the month it recurs on) for a new one, or action="remove" and merchant for cancelling an existing one. The query intent covers spending questions like "how much did I spend this week" or "how much on food this month" — extract period as one of today, week, or month, and category when the question is about one category. The correction intent covers fixing the last logged expense, like "actually that was $12", "it was in ringgit" or "that was Transport" — extract whichever of amount, currency, merchant and category the user is changing. A category is one of Food, Transport, Groceries, Entertainment, Bills, Health, Education, Travel, Shopping or Others; a currency is SGD, MYR (ringgit, RM) or USD. Use decimal numbers for money values like 4.5. Keep responses concise and practical.',
+      systemInstruction: CLASSIFIER_INSTRUCTION,
       contents: [{ text: prompt }],
       timeoutMs: 15000,
     });
@@ -169,77 +193,126 @@ async function withBudgetAlert(userId: string, reply: string, transaction: Trans
   return alert ? `${reply}\n\n${alert}` : reply;
 }
 
+export interface ReplyOptions {
+  /** How an expense in this message gets logged: 'text' (the default) or 'voice'. */
+  source?: ExpenseSource;
+  /**
+   * The transaction whose confirmation the user replied to. A correction
+   * changes that one instead of the latest.
+   */
+  targetTransactionId?: string | null;
+  /** Injectable for tests. */
+  now?: Date;
+}
+
 export async function buildAssistantReply(
   userId: string,
   result: IntentAnalysis,
-  source: ExpenseSource = 'text',
-): Promise<string> {
-  const { intent, extracted, rawText, serviceError } = result;
-
-  if (serviceError) {
-    return formatUserFriendlyError();
+  options: ReplyOptions = {},
+): Promise<BotReply> {
+  if (result.serviceError) {
+    return { text: formatUserFriendlyError() };
   }
+  const reply = await replyForIntent(userId, result, {
+    source: options.source ?? 'text',
+    targetTransactionId: options.targetTransactionId ?? null,
+    now: options.now ?? new Date(),
+  });
+  return typeof reply === 'string' ? { text: reply } : reply;
+}
+
+async function replyForIntent(
+  userId: string,
+  result: IntentAnalysis,
+  options: Required<ReplyOptions>,
+): Promise<string | BotReply> {
+  const { intent, extracted, rawText } = result;
+  const { source, targetTransactionId, now } = options;
 
   switch (intent) {
     case 'expense': {
       const { logExpense } = await import('../expense/service');
+      const { matchCategory } = await import('../expense/categorizer');
 
       const amount = extracted.amount ?? 0;
       if (amount <= 0) {
         return `How much did you spend? Try "Spent $4.50 at Ya Kun".`;
       }
 
-      const currency: Currency | undefined = VALID_CURRENCIES.has(extracted.currency ?? '')
-        ? (extracted.currency as Currency)
-        : undefined;
-
       const transaction = await logExpense(userId, {
         amount,
-        currency,
+        currency: currencyFrom(extracted.currency),
         merchant: extracted.merchant,
         source,
+        // The classifier has already categorized it; logExpense still prefers
+        // the user's own history with the merchant, and no longer needs a
+        // second LLM call for a new one.
+        categoryHint: (extracted.category && matchCategory(extracted.category)) || undefined,
+        spentAt: earlierDay(extracted.date, now),
       });
 
-      return withBudgetAlert(
-        userId,
-        `Logged ${formatMoneyWithSgd(transaction)} at ${transaction.merchant} under ${transaction.category}.`,
-        transaction,
-      );
+      return {
+        text: await withBudgetAlert(userId, `Logged ${formatExpenseLine(transaction, now)}.`, transaction),
+        keyboard: transactionActions(transaction.id),
+      };
+    }
+    case 'income': {
+      const { logIncome } = await import('../income/service');
+
+      const amount = extracted.amount ?? 0;
+      if (amount <= 0) {
+        return `How much came in? Try "Salary $5200".`;
+      }
+
+      const receivedAt = earlierDay(extracted.date, now);
+      const entry = await logIncome(userId, {
+        amount,
+        currency: currencyFrom(extracted.currency),
+        source: extracted.merchant,
+        receivedAt,
+      });
+      const dated = receivedAt ? `, on ${formatDay(entry.received_at)}` : '';
+      return {
+        text: `Recorded ${formatMoneyWithSgd(entry)} of income from ${entry.source}${dated}. /month shows your savings rate.`,
+        keyboard: incomeActions(entry.id),
+      };
     }
     case 'budget': {
-      const { setBudget, removeBudget, findBudgetByCategory } = await import('../budget/service');
-      const { matchCategory, VALID_CATEGORIES } = await import('../expense/categorizer');
+      const { setBudget, removeBudget, findBudgetByCategory, matchBudgetCategory } = await import('../budget/service');
+      const { VALID_CATEGORIES } = await import('../expense/categorizer');
 
       if (!extracted.category) {
-        return `Sure — which category's budget should I update? Try "Set food budget to $800/month".`;
+        return `Sure — which category's budget should I update? Try "Set food budget to $800/month", or "Monthly budget $3000" for all spending.`;
       }
 
       // An unrecognized category used to become an "Others" budget silently.
-      const category = matchCategory(extracted.category);
+      const category = matchBudgetCategory(extracted.category);
       if (!category) {
-        return `Budgets are set per category: ${VALID_CATEGORIES.join(', ')}. Which one should "${extracted.category}" be?`;
+        return `Budgets are set per category (${VALID_CATEGORIES.join(', ')}), or ${OVERALL_BUDGET} for all spending. Which one should "${extracted.category}" be?`;
       }
+      const label = category === OVERALL_BUDGET ? 'overall' : category;
       const isRemoval = /remove|delete|cancel/i.test(extracted.action ?? rawText);
 
       if (isRemoval) {
         if (!(await findBudgetByCategory(userId, category))) {
-          return `You don't have a ${category} budget to remove.`;
+          return `You don't have ${category === OVERALL_BUDGET ? 'an overall' : `a ${category}`} budget to remove.`;
         }
         await removeBudget(userId, category);
-        return `Done — removed the ${category} budget.`;
+        return `Done — removed the ${label} budget.`;
       }
 
       const amount = extracted.budgetAmount ?? extracted.amount ?? 0;
       if (amount <= 0) {
-        return `What amount should the ${category} budget be? Try "Set food budget to $800/month".`;
+        return `What amount should the ${label} budget be? Try "Set food budget to $800/month".`;
       }
 
-      const currency: Currency = VALID_CURRENCIES.has(extracted.currency ?? '') ? (extracted.currency as Currency) : 'SGD';
-      const budget = await setBudget(userId, category, amount, currency);
-      return `Got it — ${category} budget set to ${formatMoneyWithSgd(budget)} a month.`;
+      const budget = await setBudget(userId, category, amount, currencyFrom(extracted.currency) ?? 'SGD');
+      return category === OVERALL_BUDGET
+        ? `Got it — overall budget set to ${formatMoneyWithSgd(budget)} a month, across all spending.`
+        : `Got it — ${category} budget set to ${formatMoneyWithSgd(budget)} a month.`;
     }
     case 'correction': {
-      const { correctLastTransaction } = await import('../expense/service');
+      const { correctTransaction } = await import('../expense/service');
 
       // Apply every field the message names. Currency goes before amount so the
       // amount's SGD value is worked out in the corrected currency. With
@@ -259,23 +332,33 @@ export async function buildAssistantReply(
       if (extracted.category) {
         changes.push(['category', extracted.category]);
       }
+      const date = parseIsoDate(extracted.date);
+      if (date && !isFutureDay(date, now)) {
+        changes.push(['date', toIsoDate(date)]);
+      }
 
       if (changes.length === 0) {
-        return `What should I change on your last transaction: the amount, currency, merchant or category? Try "actually it was $12" or "that was Transport".`;
+        return `What should I change: the amount, currency, merchant, category or date? Try "actually it was $12", "that was Transport" or "that was yesterday".`;
       }
 
       let corrected: Transaction | null = null;
       for (const [field, value] of changes) {
-        corrected = await correctLastTransaction(userId, field, value);
+        corrected = await correctTransaction(userId, targetTransactionId, field, value);
         if (!corrected) {
-          return `I couldn't find a recent transaction to correct. Try logging an expense first!`;
+          return targetTransactionId
+            ? `I couldn't find that expense — it may have been deleted. /recent shows what's there.`
+            : `I couldn't find a recent transaction to correct. Try logging an expense first!`;
         }
       }
 
       const transaction = corrected as Transaction;
-      const reply = `Updated your last transaction: ${formatMoneyWithSgd(transaction)} at ${transaction.merchant} under ${transaction.category}.`;
-      // A new amount, currency or category can push a budget over a threshold.
-      return changes.some(([field]) => field !== 'merchant') ? withBudgetAlert(userId, reply, transaction) : reply;
+      const which = targetTransactionId ? 'that expense' : 'your last expense';
+      const reply = `Updated ${which}: ${formatExpenseLine(transaction, now)}.`;
+      // A new amount, currency, category or date can push a budget over a threshold.
+      return {
+        text: changes.some(([field]) => field !== 'merchant') ? await withBudgetAlert(userId, reply, transaction) : reply,
+        keyboard: transactionActions(transaction.id),
+      };
     }
     case 'recurring': {
       const { createRecurring, listRecurring, removeRecurring } = await import('../expense/service');
@@ -308,13 +391,9 @@ export async function buildAssistantReply(
         return `Which day of the month does ${extracted.merchant} charge you?`;
       }
 
-      const currency: Currency | undefined = VALID_CURRENCIES.has(extracted.currency ?? '')
-        ? (extracted.currency as Currency)
-        : undefined;
-
       const recurring = await createRecurring(userId, {
         amount,
-        currency,
+        currency: currencyFrom(extracted.currency),
         merchant: extracted.merchant,
         day_of_month: dayOfMonth,
       });
@@ -387,7 +466,7 @@ export async function buildAssistantReply(
         ? (extracted.period as SpendingPeriod)
         : 'month';
 
-      const summary = await getSpendingSummary(userId, period);
+      const summary = await getSpendingSummary(userId, period, now);
       // "week" is the last 7 days, not the calendar week, so the label says that.
       const label = period === 'today' ? "Today's spend" : period === 'week' ? "Last 7 days' spend" : "This month's spend";
 
@@ -397,7 +476,7 @@ export async function buildAssistantReply(
         let budget;
         if (period === 'month') {
           const { getBudgetStatus } = await import('../budget/progress');
-          budget = (await getBudgetStatus(userId)).find((status) => status.category === category);
+          budget = (await getBudgetStatus(userId, now)).find((status) => status.category === category);
         }
         return formatCategorySpend(
           label,

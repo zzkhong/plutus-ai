@@ -7,6 +7,7 @@ import { Context } from 'hono';
 import { Bot } from 'grammy';
 import { logExpense } from '../../expense/service';
 import { budgetAlertFor } from '../../budget/alerts';
+import { transactionActions } from '../../bot/keyboards';
 import { parseExplicitCurrency } from '../../expense/currency-resolver';
 import { formatCurrency } from '../../config';
 import { logger } from '../../utils/logger';
@@ -44,7 +45,8 @@ async function sendConfirmation(bot: Bot | null, user: User, transaction: Transa
     .join('\n\n');
 
   try {
-    await bot.api.sendMessage(user.telegram_chat_id, message);
+    // The same Change category / Undo buttons a chat expense gets.
+    await bot.api.sendMessage(user.telegram_chat_id, message, { reply_markup: transactionActions(transaction.id) });
   } catch (error) {
     logger.error('Failed to send Apple Pay confirmation via Telegram', error);
   }

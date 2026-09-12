@@ -36,8 +36,7 @@ export async function deliverBudgetAlerts(
   }
 
   for (const transaction of transactions) {
-    const alert = await checkAlerts(userId, transaction);
-    if (alert) {
+    for (const alert of await checkAlerts(userId, transaction)) {
       try {
         await api.sendMessage(telegramChatId, alert.message);
       } catch (error) {

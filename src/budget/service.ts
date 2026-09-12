@@ -1,5 +1,8 @@
 /**
  * Budget CRUD service (Drizzle-backed).
+ *
+ * A budget is monthly and covers one spending category, or — as the
+ * 'Overall' budget — all spending.
  */
 
 import { randomUUID } from 'crypto';
@@ -8,13 +11,21 @@ import { db } from '../db';
 import { budget_alerts, budgets } from '../db/schema';
 import { toSGD } from '../config';
 import { getExchangeRates } from '../fx/rates';
-import { Category, Currency } from '../types';
+import { matchCategory } from '../expense/categorizer';
+import { BudgetCategory, Currency, OVERALL_BUDGET } from '../types';
 import { Budget } from './types';
+
+const OVERALL_ALIASES = new Set(['overall', 'total', 'monthly', 'month', 'all', 'everything', 'general', 'spending']);
+
+/** The budget a user named — a category, or the overall budget — or null if it's neither. */
+export function matchBudgetCategory(raw: string): BudgetCategory | null {
+  return OVERALL_ALIASES.has(raw.trim().toLowerCase()) ? OVERALL_BUDGET : matchCategory(raw);
+}
 
 function mapBudgetRow(row: typeof budgets.$inferSelect): Budget {
   return {
     id: row.id,
-    category: row.category as Category,
+    category: row.category as BudgetCategory,
     amount: row.amount,
     currency: row.currency as Currency,
     amount_sgd: row.amount_sgd,
@@ -25,7 +36,7 @@ function mapBudgetRow(row: typeof budgets.$inferSelect): Budget {
 
 export async function setBudget(
   userId: string,
-  category: Category,
+  category: BudgetCategory,
   amount: number,
   currency: Currency = 'SGD',
 ): Promise<Budget> {
@@ -66,7 +77,7 @@ export async function setBudget(
   return mapBudgetRow(inserted);
 }
 
-export async function removeBudget(userId: string, category: Category): Promise<void> {
+export async function removeBudget(userId: string, category: BudgetCategory): Promise<void> {
   const matching = and(eq(budgets.user_id, userId), eq(budgets.category, category));
   // Alert rows are deleted explicitly rather than by ON DELETE CASCADE, which
   // Turso doesn't reliably enforce (see src/db/client.ts).
@@ -76,12 +87,14 @@ export async function removeBudget(userId: string, category: Category): Promise<
   ]);
 }
 
+/** The user's budgets, the overall one first, then categories alphabetically. */
 export async function listBudgets(userId: string): Promise<Budget[]> {
   const rows = await db.select().from(budgets).where(eq(budgets.user_id, userId)).orderBy(budgets.category);
-  return rows.map(mapBudgetRow);
+  const list = rows.map(mapBudgetRow);
+  return [...list.filter((b) => b.category === OVERALL_BUDGET), ...list.filter((b) => b.category !== OVERALL_BUDGET)];
 }
 
-export async function findBudgetByCategory(userId: string, category: Category): Promise<Budget | null> {
+export async function findBudgetByCategory(userId: string, category: BudgetCategory): Promise<Budget | null> {
   const row = await db
     .select()
     .from(budgets)

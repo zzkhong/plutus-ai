@@ -10,6 +10,11 @@
  * Registration order matters: grammy runs handlers in the order they are
  * added, and the message:text handler consumes every text message without
  * calling next() — so every bot.command(...) must be registered above it.
+ *
+ * Replies about an expense carry Change category / Undo buttons; presses
+ * arrive as callback queries (handlers/callback.ts). On a webhook they only
+ * arrive if it was registered with 'callback_query' in allowed_updates — see
+ * src/scripts/telegram-webhook.ts.
  */
 
 import { Bot, InputFile } from 'grammy';
@@ -30,11 +35,17 @@ import { handleHelpCommand } from './commands/help';
 import { handleSetupCommand, handleSetupTextMessage } from './commands/setup';
 import { handleApproveCommand, handleRejectCommand } from './commands/approve';
 import { handleWebhookKeyCommand } from './commands/webhookkey';
+import { handleRecentCommand } from './commands/recent';
+import { handleReviewCommand } from './commands/review';
 import { handleTextMessage } from './handlers/text';
 import { handleVoiceMessage } from './handlers/voice';
 import { handleDocumentMessage } from './handlers/document';
+import { handleReceiptPhoto } from './handlers/receipt';
+import { CallbackOutcome, handleCallback } from './handlers/callback';
 import { handleSplitCommand, handleCancelCommand, handleSplitPhoto, handleSplitTextMessage } from './commands/split';
 import { getSplitState } from '../split/state';
+import { transactionIdFromMarkup } from './keyboards';
+import { BotReply } from './types';
 
 async function downloadTelegramFile(bot: Bot<BotContext>, fileId: string): Promise<Buffer> {
   const file = await bot.api.getFile(fileId);
@@ -43,6 +54,27 @@ async function downloadTelegramFile(bot: Bot<BotContext>, fileId: string): Promi
     throw new Error(`Telegram file download failed with HTTP ${response.status}`);
   }
   return Buffer.from(await response.arrayBuffer());
+}
+
+async function sendReply(ctx: BotContext, reply: BotReply): Promise<void> {
+  await ctx.reply(reply.text, reply.keyboard ? { reply_markup: reply.keyboard } : undefined);
+}
+
+/** Applies a button press's outcome to the message the button is on. */
+async function applyCallbackOutcome(ctx: BotContext, outcome: CallbackOutcome): Promise<void> {
+  await ctx.answerCallbackQuery(outcome.toast ? { text: outcome.toast } : undefined);
+  try {
+    if (outcome.text !== undefined) {
+      // Editing the text without a reply_markup also removes the buttons.
+      await ctx.editMessageText(outcome.text, outcome.keyboard ? { reply_markup: outcome.keyboard } : undefined);
+    } else if (outcome.keyboard !== undefined) {
+      await ctx.editMessageReplyMarkup(outcome.keyboard ? { reply_markup: outcome.keyboard } : undefined);
+    }
+  } catch (error) {
+    // Telegram refuses an edit that changes nothing ("message is not
+    // modified"), which a double tap produces. The press was still handled.
+    logger.debug('Could not edit the message after a button press', error);
+  }
 }
 
 export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN): Bot<BotContext> {
@@ -124,6 +156,16 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
     await ctx.reply(await handleUndoCommand(ctx.user.id));
   });
 
+  bot.command('recent', async (ctx) => {
+    if (!ctx.user) return;
+    await sendReply(ctx, await handleRecentCommand(ctx.user.id));
+  });
+
+  bot.command('review', async (ctx) => {
+    if (!ctx.user) return;
+    await ctx.reply(await handleReviewCommand(ctx.user.id));
+  });
+
   bot.command('digest', async (ctx) => {
     if (!ctx.user) return;
     await ctx.reply(await handleDigestCommand(ctx.user.id));
@@ -185,14 +227,20 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
       return;
     }
 
-    await ctx.reply(await handleTextMessage(ctx.user.id, ctx.message.text));
+    // A reply to an expense's confirmation corrects that expense.
+    const targetTransactionId = transactionIdFromMarkup(ctx.message.reply_to_message?.reply_markup);
+    await sendReply(ctx, await handleTextMessage(ctx.user.id, ctx.message.text, targetTransactionId));
   });
 
   bot.on('message:voice', async (ctx) => {
     if (!ctx.user) return;
     const voice = ctx.message.voice;
     const buffer = await downloadTelegramFile(bot, voice.file_id);
-    await ctx.reply(await handleVoiceMessage(ctx.chat.id, ctx.user.id, buffer, voice.mime_type ?? 'audio/ogg'));
+    const targetTransactionId = transactionIdFromMarkup(ctx.message.reply_to_message?.reply_markup);
+    await sendReply(
+      ctx,
+      await handleVoiceMessage(ctx.chat.id, ctx.user.id, buffer, voice.mime_type ?? 'audio/ogg', targetTransactionId),
+    );
   });
 
   bot.on('message:document', async (ctx) => {
@@ -210,7 +258,20 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
     }
     const largest = photos[photos.length - 1];
     const buffer = await downloadTelegramFile(bot, largest.file_id);
-    await ctx.reply(await handleSplitPhoto(ctx.chat.id, ctx.user.id, buffer, 'image/jpeg'));
+    // A photo belongs to an in-progress /split; any other photo is a receipt to log.
+    if (await getSplitState(ctx.chat.id)) {
+      await ctx.reply(await handleSplitPhoto(ctx.chat.id, ctx.user.id, buffer, 'image/jpeg'));
+      return;
+    }
+    await sendReply(ctx, await handleReceiptPhoto(ctx.user.id, buffer, 'image/jpeg', ctx.message.caption));
+  });
+
+  bot.on('callback_query:data', async (ctx) => {
+    if (!ctx.user) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    await applyCallbackOutcome(ctx, await handleCallback(ctx.user.id, ctx.callbackQuery.data));
   });
 
   return bot;

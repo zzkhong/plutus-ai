@@ -3,8 +3,8 @@
  * development (`npm run dev`) or a self-hosted server (`npm run start`).
  *
  * Unlike the Vercel deployment (src/app.ts), this process owns everything
- * itself: it migrates the database on boot, long-polls Telegram, runs the two
- * daily jobs with node-cron, and serves the HTTP app on config.PORT.
+ * itself: it migrates the database on boot, long-polls Telegram, runs the
+ * scheduled jobs with node-cron, and serves the HTTP app on config.PORT.
  */
 
 import { logger } from './utils/logger';
@@ -13,6 +13,7 @@ import { runMigrations } from './db/migrate';
 import { createBot, startPolling } from './bot';
 import { startRecurringScheduler, triggerRecurringNow } from './scheduler/recurring';
 import { startDigestScheduler } from './digest';
+import { startReviewScheduler } from './review';
 import { startWebhookServer } from './webhook';
 
 async function main(): Promise<void> {
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
 
   startRecurringScheduler(bot);
   startDigestScheduler(bot);
+  startReviewScheduler(bot);
   startWebhookServer(bot);
 
   // Catch up on recurring charges if the process was down at midnight. Safe

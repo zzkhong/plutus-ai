@@ -24,10 +24,11 @@ export interface Transaction {
   amount_sgd: number; // normalized to SGD in cents
   merchant: string;
   category: Category;
-  source: string; // e.g., "OCBC", "DBS"
+  source: string; // how it was logged: text, voice, receipt, apple_pay, split, recurring
   card_name: string; // e.g., "OCBC iPhone"
   note?: string;
-  created_at: Date;
+  spent_at: Date; // when the money was spent; totals and budgets go by this
+  created_at: Date; // when it was logged; "latest" goes by this
   updated_at?: Date;
 }
 
@@ -41,4 +42,15 @@ export interface RecurringTransaction {
   is_active: boolean;
   created_at: Date;
   updated_at?: Date;
+}
+
+export interface Income {
+  id: string;
+  amount: number; // in cents
+  currency: Currency;
+  amount_sgd: number; // normalized to SGD in cents
+  source: string; // what it was, e.g. "Salary"
+  note?: string;
+  received_at: Date;
+  created_at: Date;
 }

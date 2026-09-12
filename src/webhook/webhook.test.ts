@@ -55,11 +55,11 @@ after(() => {
 });
 
 function fakeBot() {
-  const sent: Array<{ chatId: string; text: string }> = [];
+  const sent: Array<{ chatId: string; text: string; options?: any }> = [];
   const bot = {
     api: {
-      sendMessage: async (chatId: string, text: string) => {
-        sent.push({ chatId, text });
+      sendMessage: async (chatId: string, text: string, options?: any) => {
+        sent.push({ chatId, text, options });
       },
     },
   } as any;
@@ -485,4 +485,41 @@ test('POST /api/apple-pay adds the budget alert to the Telegram confirmation whe
   assert.equal(sent.length, 1, 'one message: the confirmation with the alert under it');
   assert.match(sent[0].text, /Spent S\$4\.50 at Grab/);
   assert.match(sent[0].text, /Transport budget alert: you've used 80%/);
+});
+
+test('POST /api/apple-pay puts Change category and Undo buttons under the confirmation', async () => {
+  const { createWebhookApp } = await import('./index');
+  const { bot, sent } = fakeBot();
+  const app = createWebhookApp(bot);
+
+  await app.request('/api/apple-pay', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': approvedKey },
+    body: JSON.stringify({ amount: '3.20', merchant: 'Button Test Cafe', card: 'DBS' }),
+  });
+
+  const buttons = sent[0].options.reply_markup.inline_keyboard.flat().map((button: any) => button.callback_data);
+  assert.equal(buttons.length, 2);
+  assert.match(buttons[0], /^t:c:c:[0-9a-f-]{36}$/);
+  assert.match(buttons[1], /^t:d:c:[0-9a-f-]{36}$/);
+});
+
+test('GET /api/cron/review runs the month review job with the right token', async () => {
+  const { createWebhookApp } = await import('./index');
+  let reviews = 0;
+  const app = createWebhookApp(null, {
+    cronSecret: CRON_SECRET,
+    jobs: {
+      review: async () => {
+        reviews += 1;
+      },
+    },
+  });
+
+  const unauthorized = await app.request('/api/cron/review');
+  const ok = await app.request('/api/cron/review', { headers: { authorization: `Bearer ${CRON_SECRET}` } });
+
+  assert.equal(unauthorized.status, 401);
+  assert.equal(ok.status, 200);
+  assert.equal(reviews, 1);
 });

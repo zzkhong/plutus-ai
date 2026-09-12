@@ -32,6 +32,7 @@ function fakeTransaction(category: string, amountSgdCents: number) {
     category: category as any,
     source: 'recurring',
     card_name: 'Recurring',
+    spent_at: now,
     created_at: now,
     updated_at: now,
   };

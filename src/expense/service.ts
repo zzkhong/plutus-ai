@@ -1,24 +1,41 @@
 /**
  * Transaction and recurring expense service.
+ *
+ * A transaction has two times. spent_at is when the money went ("yesterday",
+ * a receipt's date, otherwise the moment it was logged) — totals, budgets,
+ * the month review and the export go by it. created_at is when it was logged
+ * — "latest" for /undo, corrections and /recent goes by that.
  */
 
 import { randomUUID } from 'crypto';
-import { and, desc, eq, gt, gte, lt, or } from 'drizzle-orm';
+import { and, desc, eq, gt, gte, lt, or, sql } from 'drizzle-orm';
 
 import { SUPPORTED_CURRENCIES, toSGD } from '../config';
 import { getExchangeRates } from '../fx/rates';
 import { db } from '../db';
 import { transactions, recurring_transactions } from '../db/schema';
 import { Category, Currency, Transaction, RecurringTransaction } from '../types';
+import { parseIsoDate } from '../utils/dates';
 import { inferCategory, matchCategory } from './categorizer';
 import { resolveCurrency } from './currency-resolver';
 import {
   Comparison,
+  CorrectionField,
   ExpenseInput,
   RecurringInput,
   SpendingPeriod,
   SpendingSummary,
 } from './types';
+
+const UNKNOWN_MERCHANT = 'Unknown merchant';
+
+/**
+ * When a row's money was spent. Falls back to created_at for a row without
+ * spent_at: migration 0002 backfilled every existing row, but it runs during
+ * the Vercel build, while the previous deployment is still live and logging
+ * expenses without the column.
+ */
+const spentAtColumn = sql<number>`coalesce(${transactions.spent_at}, ${transactions.created_at})`;
 
 function centsFromAmount(amount: number): number {
   return Math.max(0, Math.round(amount * 100));
@@ -43,6 +60,14 @@ function startOfPeriod(period: SpendingPeriod, now: Date = new Date()): number {
   return start.getTime();
 }
 
+/** Where a period ends: tomorrow for today and the last 7 days, the 1st of next month for a month. */
+function endOfPeriod(period: SpendingPeriod, now: Date = new Date()): number {
+  if (period === 'month') {
+    return new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
+  }
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+}
+
 function mapTransactionRow(row: typeof transactions.$inferSelect): Transaction {
   return {
     id: row.id,
@@ -54,9 +79,54 @@ function mapTransactionRow(row: typeof transactions.$inferSelect): Transaction {
     source: row.source,
     card_name: row.card_name,
     note: row.note ?? undefined,
+    spent_at: new Date(row.spent_at ?? row.created_at),
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
   };
+}
+
+/**
+ * The category this user last gave the same merchant (case-insensitively),
+ * corrections included — a correction bumps updated_at. Null for a merchant
+ * they've never logged.
+ */
+export async function rememberedCategory(userId: string, merchant: string): Promise<Category | null> {
+  const key = merchant.trim().toLowerCase();
+  if (!key || key === UNKNOWN_MERCHANT.toLowerCase()) {
+    return null;
+  }
+
+  const row = await db
+    .select({ category: transactions.category })
+    .from(transactions)
+    .where(and(eq(transactions.user_id, userId), sql`lower(${transactions.merchant}) = ${key}`))
+    .orderBy(desc(transactions.updated_at))
+    .limit(1)
+    .get();
+  return row ? matchCategory(row.category) : null;
+}
+
+/**
+ * A new expense's category, from the cheapest reliable source:
+ *
+ * 1. what this user filed the same merchant under last time — their own
+ *    choice, so it also carries their corrections forward;
+ * 2. the category worked out upstream (the chat classifier's, the receipt
+ *    reader's), which costs nothing extra;
+ * 3. only then, a categorization call to the user's provider.
+ *
+ * Every chat expense used to make two LLM calls — classify, then categorize
+ * — and throw the classifier's category away.
+ */
+async function resolveExpenseCategory(
+  userId: string,
+  input: { merchant: string; note?: string; amount: number; hint?: Category },
+): Promise<Category> {
+  return (
+    (await rememberedCategory(userId, input.merchant)) ??
+    input.hint ??
+    (await inferCategory(userId, { merchant: input.merchant, note: input.note, amount: input.amount }))
+  );
 }
 
 export async function logExpense(userId: string, data: ExpenseInput): Promise<Transaction> {
@@ -68,8 +138,13 @@ export async function logExpense(userId: string, data: ExpenseInput): Promise<Tr
   });
 
   const amountCents = centsFromAmount(data.amount);
-  const merchant = (data.merchant ?? 'Unknown merchant').trim() || 'Unknown merchant';
-  const category = await inferCategory(userId, { merchant, note: data.note, amount: amountCents });
+  const merchant = (data.merchant ?? UNKNOWN_MERCHANT).trim() || UNKNOWN_MERCHANT;
+  const category = await resolveExpenseCategory(userId, {
+    merchant,
+    note: data.note,
+    amount: amountCents,
+    hint: data.categoryHint,
+  });
   const now = Date.now();
   const amountSgd = toSGD(amountCents, normalizedCurrency, await getExchangeRates());
 
@@ -86,6 +161,7 @@ export async function logExpense(userId: string, data: ExpenseInput): Promise<Tr
       source: data.source ?? 'text',
       card_name: data.cardName ?? 'General',
       note: data.note ?? null,
+      spent_at: data.spentAt?.getTime() ?? now,
       created_at: now,
       updated_at: now,
     })
@@ -94,15 +170,53 @@ export async function logExpense(userId: string, data: ExpenseInput): Promise<Tr
   return mapTransactionRow(inserted);
 }
 
-export async function undoLastTransaction(userId: string): Promise<Transaction | null> {
-  const row = await db
+async function latestTransactionRow(userId: string) {
+  return db
     .select()
     .from(transactions)
     .where(eq(transactions.user_id, userId))
     .orderBy(desc(transactions.created_at))
     .limit(1)
     .get();
+}
 
+async function transactionRow(userId: string, transactionId: string) {
+  // Scoped to the user: a transaction id arrives in button data a client
+  // could forge, so an id alone must never reach someone else's row.
+  return db
+    .select()
+    .from(transactions)
+    .where(and(eq(transactions.id, transactionId), eq(transactions.user_id, userId)))
+    .get();
+}
+
+export async function getTransaction(userId: string, transactionId: string): Promise<Transaction | null> {
+  const row = await transactionRow(userId, transactionId);
+  return row ? mapTransactionRow(row) : null;
+}
+
+/** The user's most recently logged expenses, newest first. */
+export async function listRecentTransactions(userId: string, limit = 10): Promise<Transaction[]> {
+  const rows = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.user_id, userId))
+    .orderBy(desc(transactions.created_at))
+    .limit(limit);
+  return rows.map(mapTransactionRow);
+}
+
+export async function deleteTransaction(userId: string, transactionId: string): Promise<Transaction | null> {
+  const row = await transactionRow(userId, transactionId);
+  if (!row) {
+    return null;
+  }
+  await db.delete(transactions).where(and(eq(transactions.id, row.id), eq(transactions.user_id, userId)));
+  return mapTransactionRow(row);
+}
+
+export async function undoLastTransaction(userId: string): Promise<Transaction | null> {
+  const row = await latestTransactionRow(userId);
   if (!row) {
     return null;
   }
@@ -111,14 +225,23 @@ export async function undoLastTransaction(userId: string): Promise<Transaction |
   return mapTransactionRow(row);
 }
 
-export async function getSpendingSummary(userId: string, period: SpendingPeriod): Promise<SpendingSummary> {
-  const start = startOfPeriod(period);
+/** Every expense spent in [start, end), newest first. */
+export async function listTransactionsBetween(userId: string, start: Date, end: Date): Promise<Transaction[]> {
   const rows = await db
     .select()
     .from(transactions)
-    .where(and(eq(transactions.user_id, userId), gte(transactions.created_at, start)))
-    .orderBy(desc(transactions.created_at));
+    .where(
+      and(
+        eq(transactions.user_id, userId),
+        gte(spentAtColumn, start.getTime()),
+        lt(spentAtColumn, end.getTime()),
+      ),
+    )
+    .orderBy(desc(spentAtColumn), desc(transactions.created_at));
+  return rows.map(mapTransactionRow);
+}
 
+export function summarizeTransactions(period: SpendingPeriod, rows: Transaction[]): SpendingSummary {
   const byCategory: Record<string, number> = {};
   const byCategoryCount: Record<string, number> = {};
   let total = 0;
@@ -135,27 +258,36 @@ export async function getSpendingSummary(userId: string, period: SpendingPeriod)
     count: rows.length,
     byCategory,
     byCategoryCount,
-    topExpenses: rows.slice(0, 5).map(mapTransactionRow),
+    topExpenses: rows.slice(0, 5),
   };
+}
+
+/** Spending for today, the last 7 days, or `now`'s calendar month (`now` is injectable for tests). */
+export async function getSpendingSummary(
+  userId: string,
+  period: SpendingPeriod,
+  now: Date = new Date(),
+): Promise<SpendingSummary> {
+  const rows = await listTransactionsBetween(
+    userId,
+    new Date(startOfPeriod(period, now)),
+    new Date(endOfPeriod(period, now)),
+  );
+  return summarizeTransactions(period, rows);
 }
 
 export async function getSpendingByCategory(
   userId: string,
   period: SpendingPeriod,
+  now: Date = new Date(),
 ): Promise<{ category: string; total: number }[]> {
-  const summary = await getSpendingSummary(userId, period);
+  const summary = await getSpendingSummary(userId, period, now);
   return Object.entries(summary.byCategory).map(([category, total]) => ({ category, total }));
 }
 
 export async function getTopExpenses(userId: string, period: SpendingPeriod, limit = 5): Promise<Transaction[]> {
-  const start = startOfPeriod(period);
-  const rows = await db
-    .select()
-    .from(transactions)
-    .where(and(eq(transactions.user_id, userId), gte(transactions.created_at, start)))
-    .orderBy(desc(transactions.created_at))
-    .limit(limit);
-  return rows.map(mapTransactionRow);
+  const rows = await listTransactionsBetween(userId, new Date(startOfPeriod(period)), new Date(endOfPeriod(period)));
+  return rows.slice(0, limit);
 }
 
 export async function compareSpending(
@@ -172,14 +304,18 @@ export async function compareSpending(
   };
 }
 
-export async function correctLastTransaction(userId: string, field: string, value: string): Promise<Transaction | null> {
-  const row = await db
-    .select()
-    .from(transactions)
-    .where(eq(transactions.user_id, userId))
-    .orderBy(desc(transactions.created_at))
-    .limit(1)
-    .get();
+/**
+ * Changes one field of a transaction: the given one, or with a null id the
+ * user's most recently logged. Returns null when there's no such
+ * transaction for this user.
+ */
+export async function correctTransaction(
+  userId: string,
+  transactionId: string | null,
+  field: CorrectionField | string,
+  value: string,
+): Promise<Transaction | null> {
+  const row = transactionId ? await transactionRow(userId, transactionId) : await latestTransactionRow(userId);
 
   if (!row) {
     return null;
@@ -197,6 +333,12 @@ export async function correctLastTransaction(userId: string, field: string, valu
       matchCategory(value) ?? (await inferCategory(userId, { merchant: row.merchant, note: value, amount: row.amount }));
   } else if (normalizedField === 'note') {
     updates.note = value;
+  } else if (normalizedField === 'date') {
+    // The caller has already refused future dates; an unreadable one changes nothing.
+    const spentAt = parseIsoDate(value);
+    if (spentAt) {
+      updates.spent_at = spentAt.getTime();
+    }
   } else if (normalizedField === 'amount') {
     const nextAmount = centsFromAmount(Number(value));
     const resolvedCurrency = resolveCurrency({
@@ -225,6 +367,24 @@ export async function correctLastTransaction(userId: string, field: string, valu
   return mapTransactionRow(updated);
 }
 
+export async function correctLastTransaction(userId: string, field: string, value: string): Promise<Transaction | null> {
+  return correctTransaction(userId, null, field, value);
+}
+
+/** Files a transaction under the category the user picked. */
+export async function setTransactionCategory(
+  userId: string,
+  transactionId: string,
+  category: Category,
+): Promise<Transaction | null> {
+  const [updated] = await db
+    .update(transactions)
+    .set({ category, updated_at: Date.now() })
+    .where(and(eq(transactions.id, transactionId), eq(transactions.user_id, userId)))
+    .returning();
+  return updated ? mapTransactionRow(updated) : null;
+}
+
 export interface CsvExport {
   year: number;
   filename: string;
@@ -234,21 +394,11 @@ export interface CsvExport {
 
 /** Builds one calendar year of the user's transactions as CSV, in memory — nothing touches disk. */
 export async function exportCSV(userId: string, year: number): Promise<CsvExport> {
-  const rows = await db
-    .select()
-    .from(transactions)
-    .where(
-      and(
-        eq(transactions.user_id, userId),
-        gte(transactions.created_at, new Date(year, 0, 1).getTime()),
-        lt(transactions.created_at, new Date(year + 1, 0, 1).getTime()),
-      ),
-    )
-    .orderBy(desc(transactions.created_at));
+  const rows = await listTransactionsBetween(userId, new Date(year, 0, 1), new Date(year + 1, 0, 1));
 
   const lines = [
-    ['id', 'amount', 'currency', 'amount_sgd', 'merchant', 'category', 'source', 'card_name', 'note', 'created_at'].join(','),
-    ...rows.map((row: typeof transactions.$inferSelect) =>
+    ['id', 'amount', 'currency', 'amount_sgd', 'merchant', 'category', 'source', 'card_name', 'note', 'spent_at', 'created_at'].join(','),
+    ...rows.map((row) =>
       [
         row.id,
         row.amount,
@@ -259,7 +409,8 @@ export async function exportCSV(userId: string, year: number): Promise<CsvExport
         row.source,
         row.card_name,
         row.note ?? '',
-        row.created_at,
+        row.spent_at.getTime(),
+        row.created_at.getTime(),
       ]
         .map((value) => `"${String(value).replace(/"/g, '""')}"`)
         .join(','),
@@ -292,7 +443,8 @@ function mapRecurringRow(row: typeof recurring_transactions.$inferSelect): Recur
 
 export async function createRecurring(userId: string, data: RecurringInput): Promise<RecurringTransaction> {
   const amount = centsFromAmount(data.amount);
-  const category = data.category ?? (await inferCategory(userId, { merchant: data.merchant, amount }));
+  const category =
+    data.category ?? (await resolveExpenseCategory(userId, { merchant: data.merchant, amount }));
   const now = Date.now();
 
   const [inserted] = await db
@@ -400,6 +552,7 @@ export async function fireRecurringForToday(userId: string, at: Date = new Date(
         card_name: 'Recurring',
         note: `Auto-logged recurring: ${recurring.merchant}`,
         recurring_id: recurring.id,
+        spent_at: now,
         created_at: now,
         updated_at: now,
       })

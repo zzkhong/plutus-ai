@@ -1,27 +1,11 @@
 /**
- * Budget and spending types
+ * Budget types shared outside the budget module
  */
 
-import { Category, Currency } from './transaction';
+import { Category } from './transaction';
 
-export type BudgetPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+/** The budget over all spending, rather than one category. */
+export const OVERALL_BUDGET = 'Overall';
 
-export interface Budget {
-  id: string;
-  category: Category;
-  amount: number; // in cents
-  currency: Currency;
-  amount_sgd: number; // normalized to SGD in cents
-  period: BudgetPeriod;
-  created_at: Date;
-  updated_at?: Date;
-}
-
-export interface BudgetSummary {
-  category: Category;
-  budget_amount: number; // in cents
-  spent_amount: number; // in cents
-  remaining: number; // in cents
-  utilization_percentage: number;
-  period: BudgetPeriod;
-}
+/** What a budget covers: one spending category, or all spending. */
+export type BudgetCategory = Category | typeof OVERALL_BUDGET;

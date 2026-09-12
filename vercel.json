@@ -4,6 +4,7 @@
   "regions": ["hnd1"],
   "crons": [
     { "path": "/api/cron/recurring", "schedule": "0 16 * * *" },
-    { "path": "/api/cron/digest", "schedule": "0 14 * * *" }
+    { "path": "/api/cron/digest", "schedule": "0 14 * * *" },
+    { "path": "/api/cron/review", "schedule": "0 1 1 * *" }
   ]
 }

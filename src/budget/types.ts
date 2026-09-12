@@ -2,11 +2,11 @@
  * Budget module types
  */
 
-import { Category, Currency } from '../types';
+import { BudgetCategory, Currency } from '../types';
 
 export interface Budget {
   id: string;
-  category: Category;
+  category: BudgetCategory;
   amount: number; // cents, in original currency
   currency: Currency;
   amount_sgd: number; // cents, normalized to SGD
@@ -15,7 +15,7 @@ export interface Budget {
 }
 
 export interface BudgetStatus {
-  category: Category;
+  category: BudgetCategory;
   budget_amount: number; // cents, original currency
   budget_currency: Currency;
   budget_sgd: number; // cents
@@ -23,11 +23,16 @@ export interface BudgetStatus {
   percentage: number; // spent_sgd / budget_sgd * 100, one decimal place
   remaining_sgd: number; // cents, can be negative when over budget
   days_left_in_month: number;
+  /** Month-end spend at the pace so far, in cents; absent early in the month. */
+  projected_sgd?: number;
 }
+
+/** 80% and 100% of the budget, or a warning that the month's pace will overshoot it. */
+export type AlertThreshold = 80 | 100 | 'pace';
 
 export interface Alert {
   budget_id: string;
-  category: Category;
-  threshold: 80 | 100;
+  category: BudgetCategory;
+  threshold: AlertThreshold;
   message: string;
 }

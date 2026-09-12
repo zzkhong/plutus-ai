@@ -1,6 +1,7 @@
 /**
- * GET /api/cron/* — the daily triggers Vercel Cron calls on the schedules in
- * vercel.json (the recurring-charge job and the nightly digest).
+ * GET /api/cron/* — the triggers Vercel Cron calls on the schedules in
+ * vercel.json: the recurring-charge job, the nightly digest, and the
+ * month-end review on the 1st.
  *
  * Vercel sends `Authorization: Bearer <CRON_SECRET>` when CRON_SECRET is set
  * on the project. Without the check, anyone could hit the URL and make the

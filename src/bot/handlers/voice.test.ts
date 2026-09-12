@@ -96,7 +96,7 @@ test('handleVoiceMessage returns a friendly message when transcription fails, wi
 
   try {
     const { handleVoiceMessage } = await import('./voice');
-    const reply = await handleVoiceMessage(1, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
+    const { text: reply } = await handleVoiceMessage(1, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
 
     assert.match(reply, /couldn't|trouble|sorry/i);
   } finally {
@@ -110,7 +110,7 @@ test('handleVoiceMessage tells the user when the transcript is empty', async () 
 
   try {
     const { handleVoiceMessage } = await import('./voice');
-    const reply = await handleVoiceMessage(2, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
+    const { text: reply } = await handleVoiceMessage(2, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
 
     assert.match(reply, /couldn't make out/i);
   } finally {
@@ -124,7 +124,7 @@ test('handleVoiceMessage transcribes, classifies, and logs a real expense tagged
 
   try {
     const { handleVoiceMessage } = await import('./voice');
-    const reply = await handleVoiceMessage(3, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
+    const { text: reply } = await handleVoiceMessage(3, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
 
     assert.match(reply, /Heard: "Spent \$4\.50 at Ya Kun"/);
     assert.match(reply, /Ya Kun/i);
@@ -149,7 +149,7 @@ test('handleVoiceMessage routes the transcript to an active split instead of cla
 
   try {
     const { handleVoiceMessage } = await import('./voice');
-    const reply = await handleVoiceMessage(chatId, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
+    const { text: reply } = await handleVoiceMessage(chatId, userId, Buffer.from('fake ogg audio'), 'audio/ogg');
 
     assert.match(reply, /waiting on a photo/i);
   } finally {

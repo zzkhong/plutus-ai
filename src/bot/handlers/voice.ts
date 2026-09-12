@@ -12,6 +12,7 @@ import { logger } from '../../utils/logger';
 import { buildAssistantReply, classifyUserMessage } from '../ai';
 import { getSplitState } from '../../split/state';
 import { handleSplitTextMessage } from '../commands/split';
+import { BotReply } from '../types';
 
 export class VoiceTranscriptionError extends Error {}
 
@@ -46,21 +47,22 @@ export async function handleVoiceMessage(
   userId: string,
   audioBuffer: Buffer,
   mimeType: string,
-): Promise<string> {
+  targetTransactionId: string | null = null,
+): Promise<BotReply> {
   let transcript: string;
   try {
     transcript = await transcribeVoice(userId, audioBuffer, mimeType);
   } catch (error) {
     logger.warn('Voice transcription failed', { message: (error as Error).message });
-    return "Sorry, I couldn't understand that voice note — try again or type it instead.";
+    return { text: "Sorry, I couldn't understand that voice note — try again or type it instead." };
   }
 
   if (!transcript) {
-    return "I couldn't make out anything in that voice note — try again or type it instead.";
+    return { text: "I couldn't make out anything in that voice note — try again or type it instead." };
   }
 
   if (await getSplitState(chatId)) {
-    return handleSplitTextMessage(chatId, userId, transcript);
+    return { text: await handleSplitTextMessage(chatId, userId, transcript) };
   }
 
   const classification = await classifyUserMessage(userId, transcript);
@@ -70,6 +72,6 @@ export async function handleVoiceMessage(
     transcript,
   });
 
-  const reply = await buildAssistantReply(userId, classification, 'voice');
-  return `Heard: "${transcript}"\n\n${reply}`;
+  const reply = await buildAssistantReply(userId, classification, { source: 'voice', targetTransactionId });
+  return { ...reply, text: `Heard: "${transcript}"\n\n${reply.text}` };
 }

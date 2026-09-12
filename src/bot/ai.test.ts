@@ -2,6 +2,7 @@ import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { toIsoDate } from '../utils/dates';
 
 process.env.DATABASE_URL = './data/test-ai-budget.db';
 
@@ -68,7 +69,7 @@ test('buildAssistantReply logs a real expense transaction for the expense intent
 
   try {
     const { buildAssistantReply } = await import('./ai');
-    const reply = await buildAssistantReply(userId, {
+    const { text: reply } = await buildAssistantReply(userId, {
       intent: 'expense',
       confidence: 0.96,
       extracted: {
@@ -95,7 +96,7 @@ test('buildAssistantReply logs a real expense transaction for the expense intent
 
 test('buildAssistantReply asks for an amount when the expense intent has none', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'expense',
     confidence: 0.4,
     extracted: { merchant: 'Ya Kun' },
@@ -107,7 +108,7 @@ test('buildAssistantReply asks for an amount when the expense intent has none', 
 
 test('buildAssistantReply returns the generic error message when Gemini failed, not a guessed intent', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'unknown',
     confidence: 0,
     extracted: {},
@@ -120,7 +121,7 @@ test('buildAssistantReply returns the generic error message when Gemini failed, 
 
 test('buildAssistantReply sets a real budget for the budget intent', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'budget',
     confidence: 0.9,
     extracted: { category: 'Food', budgetAmount: 800 },
@@ -141,7 +142,7 @@ test('buildAssistantReply removes a budget when the action indicates removal', a
   const { setBudget, findBudgetByCategory } = await import('../budget/service');
   await setBudget(userId, 'Travel', 200, 'SGD');
 
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'budget',
     confidence: 0.9,
     extracted: { category: 'Travel', action: 'remove' },
@@ -157,7 +158,7 @@ test('buildAssistantReply removes a budget when the action indicates removal', a
 
 test('buildAssistantReply asks for a category when the budget intent has none', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'budget',
     confidence: 0.5,
     extracted: {},
@@ -169,7 +170,7 @@ test('buildAssistantReply asks for a category when the budget intent has none', 
 
 test('buildAssistantReply records a new crypto holding for the holdings intent', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'holdings',
     confidence: 0.9,
     extracted: { symbol: 'BTC', amount: 0.5, assetClass: 'crypto', currency: 'USD' },
@@ -192,7 +193,7 @@ test('buildAssistantReply removes a holding when the action indicates removal', 
   const { addHolding, listHoldings } = await import('../portfolio/service');
   await addHolding(userId, { symbol: 'ETH', name: 'ETH', quantity: 1, asset_class: 'crypto', currency: 'USD', market: 'Crypto' });
 
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'holdings',
     confidence: 0.9,
     extracted: { symbol: 'ETH', action: 'remove' },
@@ -207,7 +208,7 @@ test('buildAssistantReply removes a holding when the action indicates removal', 
 
 test('buildAssistantReply points a stock mentioned in chat to statement upload, rather than recording it', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'holdings',
     confidence: 0.9,
     extracted: { symbol: 'AAPL', amount: 10, assetClass: 'stocks_us', currency: 'USD' },
@@ -223,7 +224,7 @@ test('buildAssistantReply points a stock mentioned in chat to statement upload, 
 
 test('buildAssistantReply falls back to USD when the holdings intent has an unrecognized currency', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'holdings',
     confidence: 0.9,
     extracted: { symbol: 'DOGE', amount: 100, assetClass: 'crypto', currency: 'HKD' },
@@ -242,7 +243,7 @@ test('buildAssistantReply falls back to USD when the holdings intent has an unre
 
 test('buildAssistantReply asks whether an unknown symbol is a coin or a stock rather than guessing crypto', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'holdings',
     confidence: 0.9,
     extracted: { symbol: 'XYZ', amount: 5 },
@@ -271,7 +272,7 @@ test('buildAssistantReply infers crypto for a listed coin even without an asset 
 
 test('buildAssistantReply warns when a crypto coin has no price source', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'holdings',
     confidence: 0.9,
     extracted: { symbol: 'FOOCOIN', amount: 5, assetClass: 'crypto' },
@@ -288,7 +289,7 @@ test('buildAssistantReply explains a statement holding cannot be removed by hand
     { symbol: 'MSFT', name: 'Microsoft', quantity: 3, asset_class: 'stocks_us', currency: 'USD', market: 'NASDAQ' },
   ]);
 
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'holdings',
     confidence: 0.9,
     extracted: { symbol: 'MSFT', action: 'remove' },
@@ -302,7 +303,7 @@ test('buildAssistantReply explains a statement holding cannot be removed by hand
 
 test('buildAssistantReply says so when there is nothing to remove', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'holdings',
     confidence: 0.9,
     extracted: { symbol: 'NOTHELD', action: 'remove' },
@@ -314,7 +315,7 @@ test('buildAssistantReply says so when there is nothing to remove', async () => 
 
 test('buildAssistantReply points a stock to statement upload even when a statement already holds it', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'holdings',
     confidence: 0.9,
     extracted: { symbol: 'MSFT', amount: 5, assetClass: 'stocks_us' },
@@ -328,7 +329,7 @@ test('buildAssistantReply points a stock to statement upload even when a stateme
 
 test('buildAssistantReply asks which holding when the holdings intent has no symbol', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'holdings',
     confidence: 0.5,
     extracted: {},
@@ -349,7 +350,7 @@ test('buildAssistantReply answers a query intent with real spending data', async
     await logExpense(userId, { amount: 10, merchant: 'Fairprice', source: 'text' });
 
     const { buildAssistantReply } = await import('./ai');
-    const reply = await buildAssistantReply(userId, {
+    const { text: reply } = await buildAssistantReply(userId, {
       intent: 'query',
       confidence: 0.8,
       extracted: { period: 'today' },
@@ -370,7 +371,7 @@ test('buildAssistantReply falls back to a month query when period is not recogni
   const { buildAssistantReply } = await import('./ai');
   const monthSummary = await getSpendingSummary(userId, 'month');
 
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'query',
     confidence: 0.5,
     extracted: { period: 'this year' },
@@ -386,7 +387,7 @@ test('buildAssistantReply creates a real recurring transaction for the recurring
 
   try {
     const { buildAssistantReply } = await import('./ai');
-    const reply = await buildAssistantReply(userId, {
+    const { text: reply } = await buildAssistantReply(userId, {
       intent: 'recurring',
       confidence: 0.9,
       extracted: { amount: 15.98, merchant: 'Netflix', dayOfMonth: 5 },
@@ -410,7 +411,7 @@ test('buildAssistantReply creates a real recurring transaction for the recurring
 
 test('buildAssistantReply asks for a day of month when the recurring intent has none', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'recurring',
     confidence: 0.6,
     extracted: { amount: 15.98, merchant: 'Netflix' },
@@ -422,7 +423,7 @@ test('buildAssistantReply asks for a day of month when the recurring intent has 
 
 test('buildAssistantReply asks which merchant when the recurring intent has none', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'recurring',
     confidence: 0.5,
     extracted: {},
@@ -441,7 +442,7 @@ test('buildAssistantReply removes a recurring transaction matched by merchant', 
     await createRecurring(userId, { amount: 9.9, merchant: 'Spotify', day_of_month: 1 });
 
     const { buildAssistantReply } = await import('./ai');
-    const reply = await buildAssistantReply(userId, {
+    const { text: reply } = await buildAssistantReply(userId, {
       intent: 'recurring',
       confidence: 0.9,
       extracted: { merchant: 'Spotify', action: 'remove' },
@@ -460,7 +461,7 @@ test('buildAssistantReply removes a recurring transaction matched by merchant', 
 
 test('buildAssistantReply tells the user when no matching recurring entry is found to remove', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, {
+  const { text: reply } = await buildAssistantReply(userId, {
     intent: 'recurring',
     confidence: 0.7,
     extracted: { merchant: 'NonexistentThing', action: 'remove' },
@@ -513,11 +514,11 @@ test('an expense that crosses a budget threshold adds the alert to the reply, on
     const owner = await freshUser('test-ai-alert-chat');
     await setBudget(owner, 'Transport', 20, 'SGD');
 
-    assert.doesNotMatch(await buildAssistantReply(owner, expense(10, 'Grab')), /budget alert/);
-    assert.match(await buildAssistantReply(owner, expense(7, 'Grab')), /Transport budget alert: you've used 80%/);
-    assert.match(await buildAssistantReply(owner, expense(5, 'Grab')), /Transport budget alert: you've hit 100%/);
+    assert.doesNotMatch((await buildAssistantReply(owner, expense(10, 'Grab'))).text, /budget alert/);
+    assert.match((await buildAssistantReply(owner, expense(7, 'Grab'))).text, /Transport budget alert: you've used 80%/);
+    assert.match((await buildAssistantReply(owner, expense(5, 'Grab'))).text, /Transport budget alert: you've hit 100%/);
     assert.doesNotMatch(
-      await buildAssistantReply(owner, expense(1, 'Grab')),
+      (await buildAssistantReply(owner, expense(1, 'Grab'))).text,
       /budget alert/,
       'each threshold alerts once a month',
     );
@@ -529,7 +530,7 @@ test('an expense in ringgit is confirmed in ringgit and in SGD', async () => {
     const { buildAssistantReply } = await import('./ai');
     const owner = await freshUser('test-ai-myr-expense-chat');
 
-    const reply = await buildAssistantReply(owner, expense(45, 'Kopitiam', 'MYR'));
+    const { text: reply } = await buildAssistantReply(owner, expense(45, 'Kopitiam', 'MYR'));
 
     assert.match(reply, /RM45\.00 \(S\$14\.02\)/);
   });
@@ -540,7 +541,7 @@ test('a budget is set in the currency the user named', async () => {
   const { findBudgetByCategory } = await import('../budget/service');
   const owner = await freshUser('test-ai-budget-currency-chat');
 
-  const reply = await buildAssistantReply(owner, {
+  const { text: reply } = await buildAssistantReply(owner, {
     intent: 'budget',
     confidence: 0.9,
     extracted: { category: 'Shopping', budgetAmount: 500, currency: 'MYR' },
@@ -559,7 +560,7 @@ test('a budget for a category that is not one of ours gets a question, not an "O
   const { listBudgets } = await import('../budget/service');
   const owner = await freshUser('test-ai-budget-unknown-category-chat');
 
-  const reply = await buildAssistantReply(owner, {
+  const { text: reply } = await buildAssistantReply(owner, {
     intent: 'budget',
     confidence: 0.9,
     extracted: { category: 'coffee', budgetAmount: 50 },
@@ -574,7 +575,7 @@ test('removing a budget that does not exist says so', async () => {
   const { buildAssistantReply } = await import('./ai');
   const owner = await freshUser('test-ai-budget-remove-missing-chat');
 
-  const reply = await buildAssistantReply(owner, {
+  const { text: reply } = await buildAssistantReply(owner, {
     intent: 'budget',
     confidence: 0.9,
     extracted: { category: 'Health', action: 'remove' },
@@ -590,7 +591,7 @@ test('a correction can change the currency, keeping the amount and category', as
   const owner = await freshUser('test-ai-correct-currency-chat');
   await withCategorizer(() => buildAssistantReply(owner, expense(45, 'Kopitiam')));
 
-  const reply = await buildAssistantReply(owner, correction({ currency: 'MYR' }, 'it was in ringgit'));
+  const { text: reply } = await buildAssistantReply(owner, correction({ currency: 'MYR' }, 'it was in ringgit'));
 
   assert.match(reply, /RM45\.00 \(S\$14\.02\)/);
   const [last] = await getTopExpenses(owner, 'today', 1);
@@ -606,7 +607,7 @@ test('a correction applies a new currency and amount together', async () => {
   const owner = await freshUser('test-ai-correct-both-chat');
   await withCategorizer(() => buildAssistantReply(owner, expense(45, 'Kopitiam')));
 
-  const reply = await buildAssistantReply(owner, correction({ amount: 12, currency: 'MYR' }, 'actually it was RM 12'));
+  const { text: reply } = await buildAssistantReply(owner, correction({ amount: 12, currency: 'MYR' }, 'actually it was RM 12'));
 
   assert.match(reply, /RM12\.00 \(S\$3\.74\)/);
   const [last] = await getTopExpenses(owner, 'today', 1);
@@ -626,7 +627,7 @@ test('a correction uses a category the user names as-is, without asking the mode
     throw new Error('the categorizer should not be called');
   }) as typeof fetch;
   try {
-    const reply = await buildAssistantReply(owner, correction({ category: 'groceries' }, 'that was groceries'));
+    const { text: reply } = await buildAssistantReply(owner, correction({ category: 'groceries' }, 'that was groceries'));
     assert.match(reply, /under Groceries/);
   } finally {
     global.fetch = originalFetch;
@@ -642,7 +643,7 @@ test('a correction with nothing identifiable asks what to change instead of gues
   const owner = await freshUser('test-ai-correct-nothing-chat');
   await withCategorizer(() => buildAssistantReply(owner, expense(45, 'Kopitiam')));
 
-  const reply = await buildAssistantReply(owner, correction({}, 'no, that is wrong'));
+  const { text: reply } = await buildAssistantReply(owner, correction({}, 'no, that is wrong'));
 
   assert.match(reply, /What should I change/);
   const [last] = await getTopExpenses(owner, 'today', 1);
@@ -661,7 +662,7 @@ test('a spending question about one category answers for that category, with its
   });
   await setBudget(owner, 'Food', 100, 'SGD');
 
-  const reply = await buildAssistantReply(owner, {
+  const { text: reply } = await buildAssistantReply(owner, {
     intent: 'query',
     confidence: 0.9,
     extracted: { period: 'month', category: 'food' },
@@ -676,9 +677,169 @@ test('a spending question about one category answers for that category, with its
 
 test('the help intent lists every command, not a partial set', async () => {
   const { buildAssistantReply } = await import('./ai');
-  const reply = await buildAssistantReply(userId, { intent: 'help', confidence: 0.9, extracted: {}, rawText: 'help' });
+  const { text: reply } = await buildAssistantReply(userId, { intent: 'help', confidence: 0.9, extracted: {}, rawText: 'help' });
 
-  for (const command of ['/today', '/month', '/budget', '/undo', '/export', '/split', '/digest']) {
+  for (const command of ['/today', '/month', '/budget', '/recent', '/undo', '/review', '/export', '/split', '/digest']) {
     assert.ok(reply.includes(command), `help is missing ${command}`);
   }
+});
+
+// --- dates, the classifier's category, buttons, replies and the overall budget ---
+
+function geminiRestResponse(text: string): Response {
+  return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function hinted(amount: number, merchant: string, category: string, date?: string) {
+  return {
+    intent: 'expense' as const,
+    confidence: 0.95,
+    extracted: { amount, merchant, category, ...(date ? { date } : {}) },
+    rawText: `Spent ${amount} at ${merchant}`,
+  };
+}
+
+test('classifyUserMessage gives the model today\'s date, so "yesterday" can be worked out', async () => {
+  const { classifyUserMessage } = await import('./ai');
+  const originalFetch = global.fetch;
+  let requestBody = '';
+  global.fetch = (async (_url: unknown, init?: Parameters<typeof fetch>[1]) => {
+    requestBody = String(init?.body);
+    return geminiRestResponse('{"intent":"expense","confidence":0.9,"extracted":{"amount":5,"date":"2026-06-19"},"rawText":"kopi 5 yesterday"}');
+  }) as typeof fetch;
+
+  try {
+    const result = await classifyUserMessage(userId, 'kopi 5 yesterday', new Date(2026, 5, 20, 9));
+    assert.match(requestBody, /Today is Saturday 2026-06-20/);
+    assert.equal(result.extracted.date, '2026-06-19');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('an expense dated to an earlier day is logged on that day, and the reply says which', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { listRecentTransactions } = await import('../expense/service');
+  const owner = await freshUser('test-ai-backdate-chat');
+
+  const { text } = await buildAssistantReply(owner, hinted(12, 'Grab', 'Transport', '2026-06-19'), {
+    now: new Date(2026, 5, 20, 15),
+  });
+
+  assert.equal(text, 'Logged S$12.00 at Grab under Transport, on 19 Jun 2026.');
+  const [logged] = await listRecentTransactions(owner, 1);
+  assert.equal(toIsoDate(logged.spent_at), '2026-06-19');
+});
+
+test('an expense dated in the future is logged now rather than on that day', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { listRecentTransactions } = await import('../expense/service');
+  const owner = await freshUser('test-ai-future-date-chat');
+  const tomorrow = toIsoDate(new Date(Date.now() + 86_400_000));
+
+  const { text } = await buildAssistantReply(owner, hinted(3, 'Kopi', 'Food', tomorrow));
+
+  assert.equal(text, 'Logged S$3.00 at Kopi under Food.');
+  const [logged] = await listRecentTransactions(owner, 1);
+  assert.equal(toIsoDate(logged.spent_at), toIsoDate(new Date()));
+});
+
+test("the classifier's category files a new merchant without a categorization call", async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const owner = await freshUser('test-ai-hint-chat');
+  const originalFetch = global.fetch;
+  global.fetch = (() => {
+    throw new Error('no LLM call should be needed');
+  }) as typeof fetch;
+
+  try {
+    const { text } = await buildAssistantReply(owner, hinted(30, 'Kinokuniya', 'education'));
+    assert.match(text, /under Education/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('an expense confirmation carries Change category and Undo buttons for that expense', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { listRecentTransactions } = await import('../expense/service');
+  const owner = await freshUser('test-ai-buttons-chat');
+
+  const reply = await buildAssistantReply(owner, hinted(4.5, 'Ya Kun', 'Food'));
+
+  const [logged] = await listRecentTransactions(owner, 1);
+  assert.deepEqual(
+    (reply.keyboard!.inline_keyboard.flat() as any[]).map((button) => [button.text, button.callback_data]),
+    [
+      ['Change category', `t:c:c:${logged.id}`],
+      ['Undo', `t:d:c:${logged.id}`],
+    ],
+  );
+});
+
+test('a correction sent as a reply to a confirmation changes that expense, not the latest', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { transactionIdFromMarkup } = await import('./keyboards');
+  const { listRecentTransactions } = await import('../expense/service');
+  const owner = await freshUser('test-ai-reply-correction-chat');
+  const first = await buildAssistantReply(owner, hinted(10, 'Old Cafe', 'Food'));
+  await buildAssistantReply(owner, hinted(20, 'New Cafe', 'Food'));
+
+  const { text } = await buildAssistantReply(owner, correction({ amount: 12 }, 'it was $12'), {
+    targetTransactionId: transactionIdFromMarkup(first.keyboard),
+  });
+
+  assert.equal(text, 'Updated that expense: S$12.00 at Old Cafe under Food.');
+  const [latest] = await listRecentTransactions(owner, 1);
+  assert.equal(latest.merchant, 'New Cafe');
+  assert.equal(latest.amount, 2000);
+});
+
+test('a correction can move the last expense to another day', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { listRecentTransactions } = await import('../expense/service');
+  const owner = await freshUser('test-ai-date-correction-chat');
+  const now = new Date(2026, 5, 20, 15);
+  await buildAssistantReply(owner, hinted(9, 'Hawker', 'Food'), { now });
+
+  const { text } = await buildAssistantReply(owner, correction({ date: '2026-06-18' }, 'that was on Thursday'), { now });
+
+  assert.equal(text, 'Updated your last expense: S$9.00 at Hawker under Food, on 18 Jun 2026.');
+  const [logged] = await listRecentTransactions(owner, 1);
+  assert.equal(toIsoDate(logged.spent_at), '2026-06-18');
+});
+
+test('an overall budget covers all spending, alerts on it, and can be removed', async () => {
+  const { buildAssistantReply } = await import('./ai');
+  const { listBudgets } = await import('../budget/service');
+  const owner = await freshUser('test-ai-overall-budget-chat');
+  const budget = (category: string, extra: Record<string, unknown> = {}) => ({
+    intent: 'budget' as const,
+    confidence: 0.9,
+    extracted: { category, ...extra },
+    rawText: `${category} budget`,
+  });
+
+  assert.equal(
+    (await buildAssistantReply(owner, budget('Overall', { budgetAmount: 50 }))).text,
+    'Got it — overall budget set to S$50.00 a month, across all spending.',
+  );
+  await buildAssistantReply(owner, budget('total', { budgetAmount: 40 }));
+  assert.deepEqual(
+    (await listBudgets(owner)).map((b) => [b.category, b.amount]),
+    [['Overall', 4000]],
+    '"total" is the same overall budget',
+  );
+
+  await buildAssistantReply(owner, hinted(20, 'Hawker', 'Food'));
+  const { text } = await buildAssistantReply(owner, hinted(16, 'Taxi', 'Transport'));
+  assert.match(text, /Overall budget alert: you've used 80% \(S\$36\.00 \/ S\$40\.00\)/);
+
+  assert.equal(
+    (await buildAssistantReply(owner, budget('overall', { action: 'remove' }))).text,
+    'Done — removed the overall budget.',
+  );
 });
