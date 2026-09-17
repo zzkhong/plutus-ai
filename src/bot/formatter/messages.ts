@@ -7,7 +7,7 @@ import type { SpendingSummary } from '../../expense/types';
 import type { BudgetStatus } from '../../budget/types';
 import { formatCurrency } from '../../config/currencies';
 import { Currency, Transaction } from '../../types';
-import { formatDay, isSameDay } from '../../utils/dates';
+import { formatDay, formatShortDay, isSameDay } from '../../utils/dates';
 
 function sgd(cents: number): string {
   return formatCurrency(cents, 'SGD');
@@ -23,6 +23,17 @@ export function formatMoneyWithSgd(value: { amount: number; currency: Currency; 
     return sgd(value.amount_sgd);
   }
   return `${formatCurrency(value.amount, value.currency)} (${sgd(value.amount_sgd)})`;
+}
+
+const LABEL_MERCHANT_LENGTH = 22;
+
+/** "3 Sep · S$18.00 · Grab" — a transaction as a button label. */
+export function formatTransactionLabel(transaction: Transaction): string {
+  const merchant =
+    transaction.merchant.length > LABEL_MERCHANT_LENGTH
+      ? `${transaction.merchant.slice(0, LABEL_MERCHANT_LENGTH - 1)}…`
+      : transaction.merchant;
+  return `${formatShortDay(transaction.spent_at)} · ${sgd(transaction.amount_sgd)} · ${merchant}`;
 }
 
 /** "S$4.50 at Ya Kun under Food", plus the day when it wasn't today. */
@@ -117,30 +128,19 @@ export function formatLines(title: string, lines: string[]): string {
 }
 
 export function formatHelpMessage(): string {
-  return formatLines('Plutus commands', [
-    '/setup - register, or rotate your LLM API key',
-    '/today - today\'s spend',
-    '/month - this month\'s spend by category, and your savings rate',
-    '/budget - how each budget is doing this month',
-    '/recent - your last 10 expenses, to fix or delete any of them',
-    '/recurring - your recurring charges, to see or remove them',
-    '/undo - undo your last transaction',
-    '/review - last month in review',
-    '/export - this year\'s transactions as a CSV file',
-    '/portfolio - net worth and holdings',
-    '/split - split a bill from a receipt photo',
-    '/cancel - cancel an in-progress split',
-    '/digest - preview tonight\'s digest',
-    '/webhookkey - your iOS Shortcut webhook key',
-    '/help - this menu',
-    '',
-    'Or just message me naturally:',
+  return formatLines('Just tell me what you need — by text or voice note', [
     '“Spent $4.50 at Ya Kun” · “Grab 18 yesterday”',
     '“Salary $5200 came in” · “Monthly budget $3000”',
+    '“How much did I spend on food this month?” · “What are my budgets?”',
+    '“Actually that was $12” · “Change my NTUC expense last month to $40”',
+    '“Show my Grab expenses in August” · “Undo that”',
     '“Netflix $15.98 every 5th” · “Cancel my Spotify”',
-    '“How much did I spend on food this month?”',
-    '“Set food budget to $500” · “Actually that was $12”',
-    'Send a photo of a receipt to log it.',
+    '“How’s my portfolio?” · “Review last month” · “Send me my expenses as a spreadsheet”',
+    '',
+    'Send a receipt photo to log it (then “split this” for a shared bill), or a brokerage statement as a screenshot, PDF or CSV to import it.',
+    '',
+    'Shortcuts: /today /month /budget /recent /recurring /undo /review /export /portfolio /split /cancel /digest',
+    'Account: /setup to register or change your API key, /webhookkey for the iOS Shortcut key.',
   ]);
 }
 

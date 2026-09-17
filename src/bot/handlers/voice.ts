@@ -11,7 +11,7 @@ import { findById } from '../../users/service';
 import { logger } from '../../utils/logger';
 import { buildAssistantReply, classifyUserMessage } from '../ai';
 import { getSplitState } from '../../split/state';
-import { handleSplitTextMessage } from '../commands/split';
+import { FileDownloader, handleSplitTextMessage } from '../commands/split';
 import { BotReply } from '../types';
 
 export class VoiceTranscriptionError extends Error {}
@@ -48,6 +48,7 @@ export async function handleVoiceMessage(
   audioBuffer: Buffer,
   mimeType: string,
   targetTransactionId: string | null = null,
+  downloadFile?: FileDownloader,
 ): Promise<BotReply> {
   let transcript: string;
   try {
@@ -72,6 +73,11 @@ export async function handleVoiceMessage(
     transcript,
   });
 
-  const reply = await buildAssistantReply(userId, classification, { source: 'voice', targetTransactionId });
+  const reply = await buildAssistantReply(userId, classification, {
+    source: 'voice',
+    targetTransactionId,
+    chatId,
+    downloadFile,
+  });
   return { ...reply, text: `Heard: "${transcript}"\n\n${reply.text}` };
 }

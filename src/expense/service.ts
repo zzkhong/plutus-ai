@@ -83,6 +83,7 @@ function mapTransactionRow(row: typeof transactions.$inferSelect): Transaction {
     spent_at: new Date(row.spent_at ?? row.created_at),
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
+    photo_file_id: row.photo_file_id ?? undefined,
   };
 }
 
@@ -164,6 +165,7 @@ export async function logExpense(userId: string, data: ExpenseInput): Promise<Tr
       card_name: data.cardName ?? 'General',
       note: data.note ?? null,
       spent_at: data.spentAt?.getTime() ?? now,
+      photo_file_id: data.photoFileId ?? null,
       created_at: now,
       updated_at: now,
     })
@@ -240,6 +242,47 @@ export async function listTransactionsBetween(userId: string, start: Date, end: 
       ),
     )
     .orderBy(desc(spentAtColumn), desc(transactions.created_at));
+  return rows.map(mapTransactionRow);
+}
+
+export interface TransactionSearch {
+  /** Part of the merchant's name, ignoring case: "ntuc" finds "NTUC FairPrice". */
+  merchant?: string;
+  category?: Category;
+  /** A `[from, to)` window on when the money was spent. */
+  from?: Date;
+  to?: Date;
+  limit?: number;
+}
+
+/**
+ * The user's expenses matching a description, newest spent first — how a
+ * message like "change my NTUC expense last Tuesday to $40" finds the row it
+ * means without the user scrolling back to its confirmation.
+ */
+export async function findTransactions(userId: string, search: TransactionSearch): Promise<Transaction[]> {
+  const conditions = [eq(transactions.user_id, userId)];
+  const merchant = search.merchant?.trim().toLowerCase();
+  if (merchant) {
+    const pattern = `%${merchant.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    conditions.push(sql`lower(${transactions.merchant}) like ${pattern} escape '\\'`);
+  }
+  if (search.category) {
+    conditions.push(eq(transactions.category, search.category));
+  }
+  if (search.from) {
+    conditions.push(gte(spentAtColumn, search.from.getTime()));
+  }
+  if (search.to) {
+    conditions.push(lt(spentAtColumn, search.to.getTime()));
+  }
+
+  const rows = await db
+    .select()
+    .from(transactions)
+    .where(and(...conditions))
+    .orderBy(desc(spentAtColumn), desc(transactions.created_at))
+    .limit(search.limit ?? 10);
   return rows.map(mapTransactionRow);
 }
 

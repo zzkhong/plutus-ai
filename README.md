@@ -145,12 +145,13 @@ shows it on demand.
 
 ### And a few more things
 
-- **Split a bill** — `/split`, send a photo of the receipt, then say *"split
+- **Split a bill** — tap **Split this** under a receipt you sent, or say
+  *"split a bill"* and send the photo, then say *"split
   evenly between 3"* or *"Alice had the burger, I had the salad"*. Plutus
   reads the items, works out each person's share (tax and service charge
   included), and can log just your share as an expense.
-- **Track your portfolio** — send any broker's statement **as a file** (PDF,
-  screenshot or CSV) and your positions are imported at the statement's
+- **Track your portfolio** — send any broker's statement (a screenshot, PDF
+  or CSV) and your positions are imported at the statement's
   prices. Add crypto and cash in chat (*"I hold 0.5 BTC"*, *"cash SGD
   5000"*). For a coin Plutus doesn't know, it shows the coins with that
   ticker on CoinGecko and you tap yours. `/portfolio` shows your net worth
@@ -211,27 +212,42 @@ You don't need commands for most things. Just say what you mean:
 | "Spent $4.50 at Ya Kun" · "RM 45 at Kopitiam" · "Grab 12.80" | logs the expense and categorizes it |
 | "Grab 18 yesterday" · "dinner $60 last Friday" | logs it on that day |
 | a photo of a receipt | logs its total, merchant and date |
+| "Split this" · tapping **Split this** under a receipt | splits that receipt instead, and logs only your share |
+| "Split a bill" | starts a split and waits for the photo |
+| a screenshot of your brokerage app | imports your positions |
 | "Actually that was $12" · "it was in ringgit" · "that was Transport" | corrects your latest expense |
 | a reply to an expense: "it was $12" · "that was yesterday" | corrects that expense |
+| "Change my NTUC expense last month to $40" · "the Grab on 3 Aug was Transport" | finds that expense and corrects it — if several match, tap the one you mean |
+| "Show my Grab expenses in August" · "What did I buy on 3 Aug?" | lists them, to change or delete any |
+| "Undo that" | removes your most recent expense |
 | "Salary $5200 came in" · "freelance RM 800" | records income |
 | "How much did I spend this week?" · "…on food this month?" | tells you, with the budget if you have one |
 | "Set food budget to $500" · "Monthly budget $3000" · "Remove my travel budget" | sets or removes a budget |
 | "Netflix $15.98 every 5th" · "Netflix is now $17.98" · "Cancel my Spotify" | starts, changes or stops a recurring charge |
 | "Show my recurring expenses" · "What subscriptions do I have?" | lists them, same as `/recurring` |
+| "What are my budgets?" | same as `/budget` |
 | "I hold 0.5 BTC" · "cash SGD 5000" | adds a crypto or cash holding |
+| "How's my portfolio?" · "What's my net worth?" | same as `/portfolio` |
+| "Send me my expenses as a spreadsheet" · "Export 2025" | sends the CSV, for this year or the year you name |
+| "Review last month" · "Give me my digest" | same as `/review` and `/digest` |
 | a voice note saying any of the above | does the same |
+
+Every command except `/setup` and `/webhookkey` works this way. Those two
+stay commands on purpose: one registers you and handles your API key, the
+other shows a secret.
 
 ---
 
 ## Good to know
 
 - **A typed correction fixes your latest expense**, unless you send it as a
-  reply to a particular one. `/undo` always removes the latest. For anything
-  older, use its buttons or `/recent`.
+  reply to a particular one or say which one you mean (*"my NTUC expense
+  last month"*). `/undo` always removes the latest.
 - **"This week" means the last 7 days**, and the answer says so.
-- **Photos are receipts.** A photo is logged as an expense unless a `/split`
-  is waiting for it. A receipt sent as a file, such as a PDF e-receipt, is
-  logged too. Brokerage statements must be sent as a file.
+- **Photos are usually receipts.** A photo is logged as an expense unless a
+  split is waiting for it; a photo that isn't a receipt, like a screenshot of
+  your brokerage app, is imported as a statement instead. A receipt sent as a
+  file, such as a PDF e-receipt, is logged too.
 - **Messages are handled in the order you send them**, so a quick "actually
   that was $5" always applies to the expense you just sent.
 - **Your messages are read by Google Gemini, using your own key.** On

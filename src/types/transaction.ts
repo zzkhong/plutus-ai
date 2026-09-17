@@ -30,6 +30,7 @@ export interface Transaction {
   spent_at: Date; // when the money was spent; totals and budgets go by this
   created_at: Date; // when it was logged; "latest" goes by this
   updated_at?: Date;
+  photo_file_id?: string; // Telegram file_id of the receipt photo it was read from
 }
 
 export interface RecurringTransaction {

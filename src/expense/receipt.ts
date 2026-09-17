@@ -16,6 +16,13 @@ import { matchCategory, VALID_CATEGORIES } from './categorizer';
 
 export class ReceiptReadError extends Error {}
 
+/**
+ * The model's answer that the image isn't a receipt at all, as opposed to a
+ * receipt it couldn't read. Only this one sends a photo on to the statement
+ * reader: a blurry receipt must not be imported as a portfolio.
+ */
+export class NotAReceiptError extends ReceiptReadError {}
+
 export interface ReceiptExpense {
   merchant: string | null;
   total: number; // in major units, e.g. 23.40
@@ -45,7 +52,7 @@ export function parseReceiptExpense(rawText: string): ReceiptExpense {
   }
 
   if (parsed.isReceipt === false) {
-    throw new ReceiptReadError('Not a receipt');
+    throw new NotAReceiptError('Not a receipt');
   }
   if (typeof parsed.total !== 'number' || !Number.isFinite(parsed.total) || parsed.total <= 0) {
     throw new ReceiptReadError('Missing or invalid total');

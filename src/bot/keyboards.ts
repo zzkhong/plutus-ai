@@ -7,7 +7,10 @@
  *   t:s:<ctx>:<id>:<cat>  file transaction <id> under <cat>
  *   t:d:<ctx>:<id>        delete transaction <id>
  *   t:b:<ctx>:<id>        back from the picker to the actions
+ *   t:p:<ctx>:<id>        split transaction <id>'s receipt photo with /split
  *   t:v:<id>              open transaction <id> from the /recent list
+ *   t:f:<id>:<field>:<v>  apply a described edit ("change my NTUC expense
+ *                         to $40") to <id>, one of the matches offered
  *   r:l                   the /recent list
  *   i:d:<id>              delete income <id>
  *   h:g:<SYMBOL>:<rank>   price chat-entered coin <SYMBOL> as the CoinGecko
@@ -17,7 +20,9 @@
  *
  * <ctx> is where the buttons sit: 'c' under a confirmation, 'r' in /recent,
  * which adds a way back to the list. The longest, "t:s:r:" + a UUID +
- * ":Entertainment", is 56 bytes.
+ * ":Entertainment", is 56 bytes. A t:f edit leaves 14 bytes for its value:
+ * enough for an amount, a date, a currency or a category, and editChoices
+ * falls back to plain t:v buttons for anything longer.
  *
  * Callback data comes back from the client, so it is untrusted: every
  * handler scopes the id to the user who pressed the button.
@@ -25,17 +30,32 @@
 
 import { InlineKeyboard } from 'grammy';
 import type { InlineKeyboardMarkup } from 'grammy/types';
+import { SUPPORTED_CURRENCIES } from '../config/currencies';
 import { matchCategory, VALID_CATEGORIES } from '../expense/categorizer';
 import { Category } from '../types';
+import { parseIsoDate } from '../utils/dates';
+
+/** Telegram's limit on a button's callback data. */
+export const MAX_CALLBACK_BYTES = 64;
 
 export type ButtonContext = 'c' | 'r';
+
+export type EditField = 'amount' | 'currency' | 'category' | 'date' | 'merchant';
+
+/** A change to one field of a transaction, with the value as it will be stored. */
+export interface TransactionEdit {
+  field: EditField;
+  value: string;
+}
 
 export type CallbackAction =
   | { kind: 'pick-category'; ctx: ButtonContext; transactionId: string }
   | { kind: 'set-category'; ctx: ButtonContext; transactionId: string; category: Category }
   | { kind: 'delete'; ctx: ButtonContext; transactionId: string }
   | { kind: 'back'; ctx: ButtonContext; transactionId: string }
+  | { kind: 'split'; ctx: ButtonContext; transactionId: string }
   | { kind: 'view'; transactionId: string }
+  | { kind: 'apply-edit'; transactionId: string; edit: TransactionEdit }
   | { kind: 'recent' }
   | { kind: 'delete-income'; incomeId: string }
   | { kind: 'pick-coin'; symbol: string; rank: number }
@@ -77,6 +97,11 @@ export function parseCallbackData(data: string): CallbackAction | null {
   if (parts[1] === 'v' && parts.length === 3 && ID.test(parts[2])) {
     return { kind: 'view', transactionId: parts[2] };
   }
+  if (parts[1] === 'f' && parts.length >= 5 && ID.test(parts[2])) {
+    // A merchant can contain ':', so the value is everything after the field.
+    const edit = parseEdit(parts[3], parts.slice(4).join(':'));
+    return edit ? { kind: 'apply-edit', transactionId: parts[2], edit } : null;
+  }
 
   const [, verb, ctx, transactionId, argument] = parts;
   if (!isContext(ctx) || !transactionId || !ID.test(transactionId)) {
@@ -89,6 +114,8 @@ export function parseCallbackData(data: string): CallbackAction | null {
       return parts.length === 4 ? { kind: 'delete', ctx, transactionId } : null;
     case 'b':
       return parts.length === 4 ? { kind: 'back', ctx, transactionId } : null;
+    case 'p':
+      return parts.length === 4 ? { kind: 'split', ctx, transactionId } : null;
     case 's': {
       const category = parts.length === 5 ? matchCategory(argument) : null;
       return category ? { kind: 'set-category', ctx, transactionId, category } : null;
@@ -98,11 +125,37 @@ export function parseCallbackData(data: string): CallbackAction | null {
   }
 }
 
-/** Change category / Undo — under every expense confirmation, and in /recent. */
-export function transactionActions(transactionId: string, ctx: ButtonContext = 'c'): InlineKeyboard {
+/** The edit a t:f button carries, or null for one that isn't valid. Button data is untrusted. */
+function parseEdit(field: string, value: string): TransactionEdit | null {
+  switch (field) {
+    case 'amount':
+      return /^\d+(\.\d{1,2})?$/.test(value) && Number(value) > 0 ? { field, value } : null;
+    case 'currency':
+      return (SUPPORTED_CURRENCIES as string[]).includes(value) ? { field, value } : null;
+    case 'category': {
+      const category = matchCategory(value);
+      return category ? { field, value: category } : null;
+    }
+    case 'date':
+      return parseIsoDate(value) ? { field, value } : null;
+    case 'merchant':
+      return value.trim() ? { field, value } : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Change category / Undo — under every expense confirmation, and in /recent.
+ * `hasPhoto` adds Split this, for an expense read from a receipt photo.
+ */
+export function transactionActions(transactionId: string, ctx: ButtonContext = 'c', hasPhoto = false): InlineKeyboard {
   const keyboard = new InlineKeyboard()
     .text('Change category', `t:c:${ctx}:${transactionId}`)
     .text(ctx === 'c' ? 'Undo' : 'Delete', `t:d:${ctx}:${transactionId}`);
+  if (hasPhoto) {
+    keyboard.row().text('Split this', `t:p:${ctx}:${transactionId}`);
+  }
   if (ctx === 'r') {
     keyboard.row().text('« All recent', 'r:l');
   }
@@ -127,6 +180,25 @@ export function recentList(entries: Array<{ id: string; label: string }>): Inlin
     keyboard.text(entry.label, `t:v:${entry.id}`).row();
   }
   return keyboard;
+}
+
+/**
+ * The matches for a described edit, each button applying the edit to its
+ * transaction in one tap. When the edit is too long for callback data
+ * (`carriesEdit` false), the buttons only open each match, to reply to.
+ */
+export function editChoices(
+  entries: Array<{ id: string; label: string }>,
+  edit: TransactionEdit,
+): { keyboard: InlineKeyboard; carriesEdit: boolean } {
+  const data = entries.map((entry) => `t:f:${entry.id}:${edit.field}:${edit.value}`);
+  const carriesEdit = data.every((d) => Buffer.byteLength(d, 'utf8') <= MAX_CALLBACK_BYTES);
+  if (!carriesEdit) {
+    return { keyboard: recentList(entries), carriesEdit };
+  }
+  const keyboard = new InlineKeyboard();
+  entries.forEach((entry, index) => keyboard.text(entry.label, data[index]).row());
+  return { keyboard, carriesEdit };
 }
 
 /** A Remove button for each recurring charge, for /recurring. */

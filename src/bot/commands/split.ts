@@ -4,7 +4,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { logExpense } from '../../expense';
+import { deleteTransaction, getTransaction, logExpense } from '../../expense';
 import { budgetAlertFor } from '../../budget/alerts';
 import { extractReceipt, ExtractionError } from '../../split/extraction';
 import { parseSplitInstructions, AssignmentParseError } from '../../split/assignment';
@@ -20,9 +20,64 @@ function formatBreakdown(result: SplitResult, currency: Currency): string {
     .join('\n');
 }
 
+/**
+ * The answers to "Log your share?" and a request to stop. These only ever
+ * run inside an active split, where the question asked is known, so they are
+ * matched directly rather than classified.
+ */
+const YES_REPLY = /^\s*(y|yes|yeah|yep|yup|sure|ok|okay|please|yes please|log it|do it)\s*[.!]*\s*$/i;
+const NO_REPLY = /^\s*(n|no|nope|nah|skip|no thanks|don'?t)\s*[.!]*\s*$/i;
+const CANCEL_REPLY = /^\s*(cancel|stop|never ?mind|forget it)\b/i;
+
+export type FileDownloader = (fileId: string) => Promise<Buffer>;
+
 export async function handleSplitCommand(chatId: number): Promise<string> {
   await startSplit(chatId);
-  return 'Send me a photo of the receipt to split, or /cancel to stop.';
+  return 'Send me a photo of the receipt to split, or say "cancel" to stop.';
+}
+
+/**
+ * Turns an expense logged from a receipt photo into a /split of that photo:
+ * fetches the photo again, reads its line items, opens the split, and only
+ * then removes the single expense — a receipt that can't be itemized keeps
+ * its expense. The user's share is logged when the split finishes.
+ */
+export async function splitLoggedReceipt(
+  chatId: number,
+  userId: string,
+  transactionId: string,
+  downloadFile: FileDownloader,
+): Promise<string> {
+  const transaction = await getTransaction(userId, transactionId);
+  if (!transaction) {
+    return 'That expense has already been deleted.';
+  }
+  if (!transaction.photo_file_id) {
+    return `That expense wasn't read from a receipt photo, so there's nothing to split. Say "split a bill" and send the photo.`;
+  }
+
+  let receipt;
+  try {
+    const photo = await downloadFile(transaction.photo_file_id);
+    receipt = await extractReceipt(userId, photo, 'image/jpeg');
+  } catch (error) {
+    if (error instanceof ExtractionError) {
+      logger.warn('Receipt extraction for a logged receipt failed', { message: error.message });
+      return `I couldn't read the items on that receipt (${error.message}), so I've kept the expense as it is.`;
+    }
+    logger.error('Could not fetch a logged receipt photo', error);
+    return "I couldn't fetch that receipt photo from Telegram, so I've kept the expense. Say \"split a bill\" and send it again.";
+  }
+
+  await startSplit(chatId);
+  await setReceipt(chatId, receipt);
+  await deleteTransaction(userId, transaction.id);
+
+  const items = `${receipt.items.length} item${receipt.items.length === 1 ? '' : 's'}`;
+  return [
+    `Removed the ${formatCurrency(transaction.amount_sgd, 'SGD')} expense at ${transaction.merchant} — I'll log your share instead.`,
+    `Got it${receipt.merchant ? ` — ${receipt.merchant}` : ''}, ${items}. Should I split it evenly, or tell me who had what?`,
+  ].join('\n\n');
 }
 
 export async function handleCancelCommand(chatId: number): Promise<string> {
@@ -59,8 +114,14 @@ export async function handleSplitTextMessage(chatId: number, userId: string, mes
     throw new Error(`handleSplitTextMessage called with no active split for chat ${chatId}`);
   }
 
+  // A split captures every message, so saying "cancel" has to work as well as /cancel.
+  if (CANCEL_REPLY.test(message)) {
+    await clearSplit(chatId);
+    return 'Split cancelled.';
+  }
+
   if (state.stage === 'awaiting_photo') {
-    return 'Still waiting on a photo of the receipt — send one, or /cancel to stop.';
+    return 'Still waiting on a photo of the receipt — send one, or say "cancel" to stop.';
   }
 
   if (state.stage === 'awaiting_instructions') {
@@ -102,8 +163,8 @@ export async function handleSplitTextMessage(chatId: number, userId: string, mes
   }
 
   if (state.stage === 'awaiting_log_confirmation') {
-    const confirmed = /^\s*y(es)?\s*$/i.test(message);
-    const declined = /^\s*no?\s*$/i.test(message);
+    const confirmed = YES_REPLY.test(message);
+    const declined = NO_REPLY.test(message);
 
     if (!confirmed && !declined) {
       return 'Reply Yes to log your share, or No to skip.';

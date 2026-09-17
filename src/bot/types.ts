@@ -12,6 +12,13 @@ export type BotIntent =
   | 'correction'
   | 'recurring'
   | 'holdings'
+  | 'find'
+  | 'export'
+  | 'portfolio'
+  | 'digest'
+  | 'review'
+  | 'undo'
+  | 'split'
   | 'help'
   | 'unknown';
 
@@ -33,4 +40,6 @@ export interface BotCommandResponse {
 export interface BotReply {
   text: string;
   keyboard?: InlineKeyboard;
+  /** A file to send, with `text` as its caption — an export asked for in chat or by voice. */
+  document?: { filename: string; content: string };
 }

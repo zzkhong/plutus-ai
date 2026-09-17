@@ -12,9 +12,11 @@ import { findCoinByRank } from '../../portfolio/price-fetcher/crypto';
 import { setCoingeckoId } from '../../portfolio/service';
 import { handleRecentCommand } from '../commands/recent';
 import { handleRecurringCommand } from '../commands/recurring';
+import { FileDownloader, splitLoggedReceipt } from '../commands/split';
 import { removeRecurring } from '../../expense/service';
 import { formatExpenseLine, formatMoneyWithSgd, formatTransactionDetail } from '../formatter/messages';
 import { backToRecent, categoryPicker, parseCallbackData, transactionActions } from '../keyboards';
+import { applyEdits, editedReply } from './edit';
 
 export interface CallbackOutcome {
   /** A brief notice at the top of the chat. */
@@ -25,7 +27,13 @@ export interface CallbackOutcome {
   keyboard?: InlineKeyboard | null;
 }
 
-export async function handleCallback(userId: string, data: string): Promise<CallbackOutcome> {
+/** What a press needs beyond the user: the chat a split opens in, and a way to fetch a receipt photo again. */
+export interface CallbackDeps {
+  chatId: number;
+  downloadFile: FileDownloader;
+}
+
+export async function handleCallback(userId: string, data: string, deps?: CallbackDeps): Promise<CallbackOutcome> {
   const action = parseCallbackData(data);
   if (!action) {
     return { toast: "That button doesn't work any more.", keyboard: null };
@@ -91,15 +99,31 @@ export async function handleCallback(userId: string, data: string): Promise<Call
   }
 
   switch (action.kind) {
+    case 'split': {
+      if (!deps) {
+        return { toast: "Splitting isn't available here." };
+      }
+      const text = await splitLoggedReceipt(deps.chatId, userId, transaction.id, deps.downloadFile);
+      // The buttons stay while the expense does: a failed split keeps it.
+      return (await getTransaction(userId, transaction.id)) ? { toast: text.slice(0, 200) } : { text, keyboard: null };
+    }
+    case 'apply-edit': {
+      const updated = await applyEdits(userId, transaction.id, [action.edit]);
+      if (!updated) {
+        return { toast: 'That expense has already been deleted.', keyboard: null };
+      }
+      const reply = await editedReply(userId, updated, [action.edit], 'that expense');
+      return { toast: 'Updated', text: reply.text, keyboard: reply.keyboard };
+    }
     case 'view':
-      return { text: formatTransactionDetail(transaction), keyboard: transactionActions(transaction.id, 'r') };
+      return { text: formatTransactionDetail(transaction), keyboard: transactionActions(transaction.id, 'r', Boolean(transaction.photo_file_id)) };
     case 'pick-category':
       return { keyboard: categoryPicker(transaction.id, action.ctx, transaction.category) };
     case 'back':
-      return { keyboard: transactionActions(transaction.id, action.ctx) };
+      return { keyboard: transactionActions(transaction.id, action.ctx, Boolean(transaction.photo_file_id)) };
     case 'set-category': {
       if (action.category === transaction.category) {
-        return { toast: `Already under ${transaction.category}`, keyboard: transactionActions(transaction.id, action.ctx) };
+        return { toast: `Already under ${transaction.category}`, keyboard: transactionActions(transaction.id, action.ctx, Boolean(transaction.photo_file_id)) };
       }
       const updated = (await setTransactionCategory(userId, transaction.id, action.category)) ?? transaction;
       // A new category can take that category's budget over a threshold.
@@ -108,7 +132,7 @@ export async function handleCallback(userId: string, data: string): Promise<Call
       return {
         toast: `Moved to ${updated.category}`,
         text: alert ? `${text}\n\n${alert}` : text,
-        keyboard: transactionActions(updated.id, action.ctx),
+        keyboard: transactionActions(updated.id, action.ctx, Boolean(updated.photo_file_id)),
       };
     }
     case 'delete': {

@@ -3,7 +3,7 @@
  */
 
 import { logger } from '../../utils/logger';
-import { buildAssistantReply, classifyUserMessage } from '../ai';
+import { buildAssistantReply, classifyUserMessage, ReplyOptions } from '../ai';
 import { BotReply } from '../types';
 
 export async function classifyIntent(userId: string, message: string): Promise<{ intent: string; confidence: number; text: string }> {
@@ -24,6 +24,7 @@ export async function handleTextMessage(
   userId: string,
   message: string,
   targetTransactionId: string | null = null,
+  options: Pick<ReplyOptions, 'chatId' | 'downloadFile'> = {},
 ): Promise<BotReply> {
   const classification = await classifyUserMessage(userId, message);
   logger.debug('Classified Telegram message', {
@@ -32,5 +33,5 @@ export async function handleTextMessage(
     rawText: classification.rawText,
   });
 
-  return buildAssistantReply(userId, classification, { targetTransactionId });
+  return buildAssistantReply(userId, classification, { ...options, targetTransactionId });
 }

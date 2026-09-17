@@ -10,14 +10,10 @@
  * read must never turn into an expense.
  */
 
-import { logger } from '../../utils/logger';
-import { formatDay } from '../../utils/dates';
-import { NotAStatementError, parseStatement, StatementFileKind, StatementParseError } from '../../portfolio/statement-parser';
-import { replaceHoldingsForBroker } from '../../portfolio/service';
-import { getPortfolioSummary } from '../../portfolio';
-import { formatCurrency } from '../../config';
+import { NotAStatementError, StatementFileKind } from '../../portfolio/statement-parser';
 import { BotReply } from '../types';
 import { handleReceiptPhoto } from './receipt';
+import { importStatement } from './statement';
 
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif']);
 const TEXT_TYPES = new Set(['application/csv', 'text/comma-separated-values']);
@@ -55,43 +51,19 @@ export async function handleDocumentMessage(
     };
   }
 
-  let statement;
+  const fileMimeType = kind === 'pdf' ? 'application/pdf' : mimeType;
   try {
-    statement = await parseStatement(userId, {
-      data: fileBuffer,
-      kind,
-      mimeType: kind === 'pdf' ? 'application/pdf' : mimeType,
-    });
+    return await importStatement(userId, fileBuffer, kind, fileMimeType);
   } catch (error) {
     if (error instanceof NotAStatementError && kind !== 'text') {
-      const receipt = await handleReceiptPhoto(userId, fileBuffer, kind === 'pdf' ? 'application/pdf' : mimeType);
+      const receipt = await handleReceiptPhoto(userId, fileBuffer, fileMimeType);
       if (receipt.keyboard) {
         return receipt;
       }
       return {
-        text: "That doesn't look like a brokerage statement or a receipt I can read. Send statements as a PDF, screenshot or CSV file, and receipts as a photo.",
-      };
-    }
-    if (error instanceof StatementParseError) {
-      logger.warn('Statement parse failed', { message: error.message });
-      return {
-        text: `I couldn't read that statement: ${error.message}. Try sending it again, or another export of it such as a PDF.`,
+        text: "That doesn't look like a brokerage statement or a receipt I can read. Send statements as a PDF, screenshot or CSV, and receipts as a photo.",
       };
     }
     throw error;
   }
-
-  const imported = await replaceHoldingsForBroker(userId, statement.broker, statement.holdings, statement.as_of);
-  const summary = await getPortfolioSummary(userId);
-
-  const count = `${imported.length} position${imported.length === 1 ? '' : 's'}`;
-  const lines = [
-    `Updated your ${statement.broker.toUpperCase()} holdings: ${count} at the statement's prices from ${formatDay(statement.as_of)}.`,
-    `New net worth: ${formatCurrency(summary.net_worth_sgd, 'SGD')}.`,
-  ];
-  if (statement.skipped.length > 0) {
-    const skipped = statement.skipped.map((s) => `${s.symbol} (${s.reason})`).join(', ');
-    lines.push(`Skipped ${statement.skipped.length} I can't value yet: ${skipped}.`);
-  }
-  return { text: lines.join('\n') };
 }

@@ -20,6 +20,14 @@ async function main(): Promise<void> {
   logger.info('Starting Plutus AI (standalone)...');
   logger.info(`Environment: ${config.NODE_ENV} | Timezone: ${config.APP_TIMEZONE} | Log level: ${config.LOG_LEVEL}`);
   logger.info(`Database: ${config.DATABASE_URL}`);
+  if (config.NODE_ENV === 'development' && config.DATABASE_URL.startsWith('libsql://')) {
+    // The development bot is separate from production's, but its data is only
+    // separate if the database is: this would migrate and write real users' rows.
+    logger.warn(
+      'DATABASE_URL points at a remote Turso database while NODE_ENV=development. Local development should use ' +
+        'file:./data/plutus.db so the development bot never touches production data.',
+    );
+  }
 
   await runMigrations();
   logger.info('Database ready');

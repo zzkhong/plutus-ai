@@ -45,6 +45,10 @@ export const transactions = sqliteTable('transactions', {
   // The recurring template that logged this row, if any — the recurring
   // job's idempotency key, so running it twice in a day can't double-log.
   recurring_id: text('recurring_id'),
+  // The Telegram file_id of the receipt photo this was read from, so "Split
+  // this" can fetch the photo again and run /split's line-item extraction on
+  // it. Only receipts have one; nothing else keeps a file_id.
+  photo_file_id: text('photo_file_id'),
   // When the money was spent: "yesterday" or a receipt's date, else the time
   // it was logged. Totals and budgets go by this; "latest" (undo, /recent,
   // corrections) goes by created_at. Nullable only because SQLite can't add a

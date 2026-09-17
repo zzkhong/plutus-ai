@@ -36,6 +36,13 @@
       "when": 1789195019801,
       "tag": "0004_indexes_and_chat_updates",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789547894606,
+      "tag": "0005_transaction_photo",
+      "breakpoints": true
     }
   ]
 }

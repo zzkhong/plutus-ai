@@ -258,10 +258,10 @@ someone deletes all of their data.
 
 ## 5. Importing your portfolio
 
-Send the bot a statement from your broker **as a file**: tap the paperclip
-and choose File, not Photo (a photo is read as a receipt). Any broker works,
-and so does any layout: a PDF statement, a screenshot of your positions
-screen, or a CSV export. The bot reads it with your own Gemini key and
+Send the bot a statement from your broker, as a photo or a file. Any broker
+works, and so does any layout: a PDF statement, a screenshot of your
+positions screen, or a CSV export. (A photo is tried as a receipt first, and
+imported as a statement when it isn't one.) The bot reads it with your own Gemini key and
 replies with what it imported:
 
 ```
@@ -422,7 +422,7 @@ The photo wasn't clear enough, wasn't a receipt, or was in a currency other
 than SGD, MYR or USD. Try a flatter, better-lit shot, or type the expense.
 
 **"I couldn't read that statement".**
-The reply says why. Make sure you sent it as a file, not a photo. If a
+The reply says why. If a screenshot is hard to read, send the PDF instead. If a
 spreadsheet export fails, export it as PDF or CSV instead. Positions in an
 unsupported currency or market are skipped and listed rather than imported.
 

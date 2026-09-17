@@ -13,6 +13,7 @@ export {
   deleteTransaction,
   exportCSV,
   findRecurringForMerchant,
+  findTransactions,
   fireRecurringForToday,
   getRecurringFiredToday,
   getSpendingByCategory,
@@ -32,4 +33,4 @@ export {
   summarizeTransactions,
   undoLastTransaction,
 } from './service';
-export type { CsvExport } from './service';
+export type { CsvExport, TransactionSearch } from './service';

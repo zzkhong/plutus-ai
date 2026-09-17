@@ -22,6 +22,8 @@ export interface ExpenseInput {
   categoryHint?: Category;
   /** When the money was spent, if not now ("yesterday", a receipt's date). */
   spentAt?: Date;
+  /** The Telegram file_id of the receipt photo, so the receipt can be split later. */
+  photoFileId?: string;
 }
 
 export interface RecurringInput {

@@ -42,7 +42,7 @@ import { handleReviewCommand } from './commands/review';
 import { handleTextMessage } from './handlers/text';
 import { handleVoiceMessage } from './handlers/voice';
 import { handleDocumentMessage } from './handlers/document';
-import { handleReceiptPhoto } from './handlers/receipt';
+import { handlePhotoMessage } from './handlers/photo';
 import { CallbackOutcome, handleCallback } from './handlers/callback';
 import { handleSplitCommand, handleCancelCommand, handleSplitPhoto, handleSplitTextMessage } from './commands/split';
 import { getSplitState } from '../split/state';
@@ -59,7 +59,15 @@ async function downloadTelegramFile(bot: Bot<BotContext>, fileId: string): Promi
 }
 
 async function sendReply(ctx: BotContext, reply: BotReply): Promise<void> {
-  await ctx.reply(reply.text, reply.keyboard ? { reply_markup: reply.keyboard } : undefined);
+  const markup = reply.keyboard ? { reply_markup: reply.keyboard } : {};
+  if (reply.document) {
+    await ctx.replyWithDocument(new InputFile(Buffer.from(reply.document.content, 'utf8'), reply.document.filename), {
+      caption: reply.text,
+      ...markup,
+    });
+    return;
+  }
+  await ctx.reply(reply.text, reply.keyboard ? markup : undefined);
 }
 
 /** Applies a button press's outcome to the message the button is on. */
@@ -238,7 +246,13 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
 
     // A reply to an expense's confirmation corrects that expense.
     const targetTransactionId = transactionIdFromMarkup(ctx.message.reply_to_message?.reply_markup);
-    await sendReply(ctx, await handleTextMessage(ctx.user.id, ctx.message.text, targetTransactionId));
+    await sendReply(
+      ctx,
+      await handleTextMessage(ctx.user.id, ctx.message.text, targetTransactionId, {
+        chatId: ctx.chat.id,
+        downloadFile: (fileId) => downloadTelegramFile(bot, fileId),
+      }),
+    );
   });
 
   bot.on('message:voice', async (ctx) => {
@@ -248,7 +262,9 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
     const targetTransactionId = transactionIdFromMarkup(ctx.message.reply_to_message?.reply_markup);
     await sendReply(
       ctx,
-      await handleVoiceMessage(ctx.chat.id, ctx.user.id, buffer, voice.mime_type ?? 'audio/ogg', targetTransactionId),
+      await handleVoiceMessage(ctx.chat.id, ctx.user.id, buffer, voice.mime_type ?? 'audio/ogg', targetTransactionId, (fileId) =>
+        downloadTelegramFile(bot, fileId),
+      ),
     );
   });
 
@@ -267,12 +283,19 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
     }
     const largest = photos[photos.length - 1];
     const buffer = await downloadTelegramFile(bot, largest.file_id);
-    // A photo belongs to an in-progress /split; any other photo is a receipt to log.
+    // A photo belongs to an in-progress /split; any other photo is a receipt
+    // to log, or a portfolio screenshot to import (handlers/photo.ts).
     if (await getSplitState(ctx.chat.id)) {
       await ctx.reply(await handleSplitPhoto(ctx.chat.id, ctx.user.id, buffer, 'image/jpeg'));
       return;
     }
-    await sendReply(ctx, await handleReceiptPhoto(ctx.user.id, buffer, 'image/jpeg', ctx.message.caption));
+    await sendReply(
+      ctx,
+      await handlePhotoMessage(ctx.user.id, buffer, 'image/jpeg', {
+        caption: ctx.message.caption,
+        photoFileId: largest.file_id,
+      }),
+    );
   });
 
   bot.on('callback_query:data', async (ctx) => {
@@ -280,7 +303,10 @@ export function createBot(token: string | undefined = config.TELEGRAM_BOT_TOKEN)
       await ctx.answerCallbackQuery();
       return;
     }
-    await applyCallbackOutcome(ctx, await handleCallback(ctx.user.id, ctx.callbackQuery.data));
+    const chatId = ctx.chat?.id;
+    const deps =
+      chatId === undefined ? undefined : { chatId, downloadFile: (fileId: string) => downloadTelegramFile(bot, fileId) };
+    await applyCallbackOutcome(ctx, await handleCallback(ctx.user.id, ctx.callbackQuery.data, deps));
   });
 
   return bot;

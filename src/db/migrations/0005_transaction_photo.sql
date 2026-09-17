@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `photo_file_id` text;

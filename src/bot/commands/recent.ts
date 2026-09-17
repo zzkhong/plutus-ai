@@ -4,18 +4,12 @@
  * to fix something that isn't the latest.
  */
 
-import { formatCurrency } from '../../config/currencies';
 import { listRecentTransactions } from '../../expense/service';
-import { formatShortDay } from '../../utils/dates';
+import { formatTransactionLabel } from '../formatter/messages';
 import { recentList } from '../keyboards';
 import { BotReply } from '../types';
 
 const RECENT_LIMIT = 10;
-const LABEL_MERCHANT_LENGTH = 22;
-
-function truncate(text: string, length: number): string {
-  return text.length > length ? `${text.slice(0, length - 1)}…` : text;
-}
 
 export async function handleRecentCommand(userId: string): Promise<BotReply> {
   const recent = await listRecentTransactions(userId, RECENT_LIMIT);
@@ -26,10 +20,7 @@ export async function handleRecentCommand(userId: string): Promise<BotReply> {
   return {
     text: `Your last ${recent.length === 1 ? 'expense' : `${recent.length} expenses`}, newest first. Tap one to change or delete it.`,
     keyboard: recentList(
-      recent.map((transaction) => ({
-        id: transaction.id,
-        label: `${formatShortDay(transaction.spent_at)} · ${formatCurrency(transaction.amount_sgd, 'SGD')} · ${truncate(transaction.merchant, LABEL_MERCHANT_LENGTH)}`,
-      })),
+      recent.map((transaction) => ({ id: transaction.id, label: formatTransactionLabel(transaction) })),
     ),
   };
 }
