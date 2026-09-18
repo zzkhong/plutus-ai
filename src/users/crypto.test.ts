@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 
 test('encrypt then decrypt returns the original plaintext', async () => {
   const { encrypt, decrypt } = await import('./crypto');
-  const plaintext = 'AIzaSyFakeGeminiKeyForTesting1234567890';
+  // Deliberately not shaped like a real provider key: a fixture matching
+  // Google's AIza+35 pattern set GitHub's secret scanner off every push.
+  const plaintext = 'fake-provider-key-for-round-trip-tests';
 
   const ciphertext = encrypt(plaintext);
   assert.notEqual(ciphertext, plaintext);
