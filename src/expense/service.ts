@@ -253,6 +253,15 @@ export interface TransactionSearch {
   from?: Date;
   to?: Date;
   limit?: number;
+  /** Only rows after this one in the list's order — keyset paging for plutus-web. */
+  after?: TransactionCursor;
+}
+
+/** A row's place in newest-spent-first order: spent time, logged time, then id to break ties. */
+export interface TransactionCursor {
+  spentAt: number;
+  createdAt: number;
+  id: string;
 }
 
 /**
@@ -276,12 +285,18 @@ export async function findTransactions(userId: string, search: TransactionSearch
   if (search.to) {
     conditions.push(lt(spentAtColumn, search.to.getTime()));
   }
+  if (search.after) {
+    const { spentAt, createdAt, id } = search.after;
+    conditions.push(
+      sql`(${spentAtColumn}, ${transactions.created_at}, ${transactions.id}) < (${spentAt}, ${createdAt}, ${id})`,
+    );
+  }
 
   const rows = await db
     .select()
     .from(transactions)
     .where(and(...conditions))
-    .orderBy(desc(spentAtColumn), desc(transactions.created_at))
+    .orderBy(desc(spentAtColumn), desc(transactions.created_at), desc(transactions.id))
     .limit(search.limit ?? 10);
   return rows.map(mapTransactionRow);
 }

@@ -4,7 +4,8 @@
  *
  * - On Vercel, src/app.ts default-exports it and Vercel turns it into a
  *   function: Telegram pushes updates to /api/telegram, Vercel Cron calls
- *   /api/cron/*, and the iOS Shortcut posts to /api/apple-pay.
+ *   /api/cron/*, the iOS Shortcut posts to /api/apple-pay, and plutus-web
+ *   (the Mini App) calls /api/web/*.
  * - In the standalone process (src/standalone.ts), startWebhookServer serves
  *   it on config.PORT. Telegram updates arrive by long polling there and
  *   node-cron runs the jobs, so only /api/apple-pay and /api/health are used.
@@ -22,6 +23,7 @@ import { apiKeyAuthMiddleware } from './auth';
 import { createApplePayHandler } from './routes/apple-pay';
 import { createCronHandler } from './routes/cron';
 import { createTelegramWebhookHandler, UpdateProcessor } from './routes/telegram';
+import { createWebApi, WebApiOptions } from './routes/web';
 import { WebhookEnv } from './types';
 
 export type CronJobs = Record<'recurring' | 'digest' | 'review', () => Promise<void>>;
@@ -33,6 +35,8 @@ export interface WebhookAppOptions {
   telegram?: UpdateProcessor | null;
   waitUntil?: (promise: Promise<unknown>) => void;
   jobs?: Partial<CronJobs>;
+  /** The /api/web secrets and clock; each defaults to config and the real time. */
+  web?: Partial<WebApiOptions>;
 }
 
 export function createWebhookApp(bot: Bot | null, options: WebhookAppOptions = {}): Hono<WebhookEnv> {
@@ -58,6 +62,10 @@ export function createWebhookApp(bot: Bot | null, options: WebhookAppOptions = {
   app.get('/api/cron/recurring', createCronHandler('recurring', jobs.recurring, { secret: cronSecret }));
   app.get('/api/cron/digest', createCronHandler('digest', jobs.digest, { secret: cronSecret }));
   app.get('/api/cron/review', createCronHandler('review', jobs.review, { secret: cronSecret }));
+  app.route(
+    '/api/web',
+    createWebApi({ botToken: config.TELEGRAM_BOT_TOKEN, sessionSecret: config.WEB_SESSION_SECRET, ...options.web }),
+  );
 
   return app;
 }

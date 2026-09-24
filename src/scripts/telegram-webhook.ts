@@ -4,6 +4,7 @@
  *   npm run telegram:webhook -- set https://your-app.vercel.app
  *   npm run telegram:webhook -- info
  *   npm run telegram:webhook -- delete
+ *   npm run telegram:webhook -- menu https://your-plutus-web.vercel.app
  *
  * Reads TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET from the environment
  * (or .env). `set` registers <base-url>/api/telegram along with the secret,
@@ -19,7 +20,7 @@ import { Api } from 'grammy';
 
 dotenv.config();
 
-const USAGE = 'Usage: npm run telegram:webhook -- <set <https-base-url> | info | delete>';
+const USAGE = 'Usage: npm run telegram:webhook -- <set <https-base-url> | info | delete | menu <https-web-url>>';
 
 function fail(message: string): never {
   console.error(message);
@@ -65,6 +66,16 @@ async function main(): Promise<void> {
     case 'delete': {
       await api.deleteWebhook();
       console.log('Webhook deleted — the bot can now be long-polled by `npm run dev`.');
+      break;
+    }
+    case 'menu': {
+      // The chat's menu button opens plutus-web as a Mini App, which is what
+      // hands the page the signed initData it logs in with.
+      if (!baseUrl?.startsWith('https://')) {
+        fail(`A Mini App must be served over HTTPS. ${USAGE}`);
+      }
+      await api.setChatMenuButton({ menu_button: { type: 'web_app', text: 'Dashboard', web_app: { url: baseUrl } } });
+      console.log(`Menu button set: ${baseUrl}`);
       break;
     }
     default:

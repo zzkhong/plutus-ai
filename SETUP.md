@@ -115,6 +115,7 @@ a key, conversions use fixed built-in rates.
 | `TELEGRAM_WEBHOOK_SECRET` | From 2.2 |
 | `CRON_SECRET` | From 2.2 |
 | `EXCHANGE_RATE_API_KEY` | Your exchangerate-api.com key |
+| `WEB_SESSION_SECRET` | Optional, only for the plutus-web dashboard: 32+ random characters, e.g. `openssl rand -hex 32`. Then run `npm run telegram:webhook -- menu <plutus-web URL>` to give the bot a Dashboard button |
 | `APP_TIMEZONE` | Optional, defaults to `Asia/Singapore` |
 
 Leave Preview unticked. Builds for other branches then skip database

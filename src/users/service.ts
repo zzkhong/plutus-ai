@@ -3,7 +3,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db } from '../db';
 import {
   budget_alerts,
@@ -151,6 +151,12 @@ export async function findByWebhookKey(webhookApiKey: string): Promise<User | nu
 export async function findById(userId: string): Promise<User | null> {
   const row = await db.select().from(users).where(eq(users.id, userId)).get();
   return row ? mapUserRow(row) : null;
+}
+
+/** Every user, newest first — plutus-web's admin view. */
+export async function listUsers(): Promise<User[]> {
+  const rows = await db.select().from(users).orderBy(desc(users.created_at));
+  return rows.map(mapUserRow);
 }
 
 export async function listApproved(): Promise<User[]> {
